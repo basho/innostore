@@ -1,0 +1,17 @@
+--- embedded_innodb-1.0.3.5325.orig/api/api0api.c	2009-09-24 13:35:08.000000000 -0600
++++ embedded_innodb-1.0.3.5325/api/api0api.c	2009-09-24 13:42:07.000000000 -0600
+@@ -5995,11 +5995,14 @@
+ 			ut_a(len != UNIV_SQL_NULL);
+ 
+ 			if (visitor(arg, (const char*) ptr, len)) {
++				ib_tuple_delete(ib_tpl);
+ 				break;
+ 			}
+ 
+ 			err = ib_cursor_next(ib_crsr);
+ 		}
++
++		ib_tuple_delete(ib_tpl);
+ 	}
+ 
+ 	ib_cursor_close(ib_crsr);

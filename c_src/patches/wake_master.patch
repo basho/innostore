@@ -1,0 +1,29 @@
+--- embedded_innodb-1.0.3.5325.orig/api/api0api.c	2009-06-12 01:55:38.000000000 -0600
++++ embedded_innodb-1.0.3.5325/api/api0api.c	2009-10-14 07:48:16.000000000 -0600
+@@ -920,6 +920,8 @@
+ 
+ 	ib_trx_release(ib_trx);
+ 
++        ib_wake_master_thread();
++
+ 	return(DB_SUCCESS);
+ }
+ 
+@@ -947,6 +949,8 @@
+ 
+ 	ib_trx_release(ib_trx);
+ 
++        ib_wake_master_thread();
++
+ 	return(err);
+ }
+ 
+@@ -3447,6 +3451,8 @@
+ 
+ 		ib_update_statistics_if_needed(table);
+ 
++		ib_wake_master_thread();
++
+ 	} else if (err == DB_RECORD_NOT_FOUND) {
+ 		trx->error_state = DB_SUCCESS;
+ 	}

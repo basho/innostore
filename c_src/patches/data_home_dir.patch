@@ -1,0 +1,33 @@
+--- embedded_innodb-1.0.3.5325.orig/fil/fil0fil.c	2009-06-12 01:54:53.000000000 -0600
++++ embedded_innodb-1.0.3.5325/fil/fil0fil.c	2009-11-09 10:10:06.000000000 -0700
+@@ -1922,9 +1922,8 @@
+ 	ut_a(namend);
+ 	path = mem_alloc(len + (namend - name) + 2);
+ 
+-	memcpy(path, srv_data_home, len);
+-	path[len] = '/';
+-	memcpy(path + len + 1, name, namend - name);
++	memcpy(path, srv_data_home, len); /* already has trailing file separator */
++	memcpy(path + len, name, namend - name);
+ 	path[len + (namend - name) + 1] = 0;
+ 
+ 	srv_normalize_path_for_win(path);
+@@ -3157,7 +3156,7 @@
+ 	filepath = mem_alloc(len);
+ 
+ 	if (ut_strlen(ptr) > 0) {
+-		ut_snprintf(filepath, len, "%s/%s/%s", ptr, dbname, filename);
++		ut_snprintf(filepath, len, "%s%s/%s", ptr, dbname, filename);
+ 	} else {
+ 		ut_snprintf(filepath, len, "%s/%s", dbname, filename);
+ 	}
+@@ -3499,7 +3498,8 @@
+ 
+ 			dbpath = mem_alloc(dbpath_len);
+ 		}
+-		sprintf(dbpath, "%s/%s", srv_data_home, dbinfo.name);
++                /* build the directory name - srv_data_home already has file separator */
++		sprintf(dbpath, "%s%s", srv_data_home, dbinfo.name);
+ 		srv_normalize_path_for_win(dbpath);
+ 
+ 		dbdir = os_file_opendir(dbpath, FALSE);
