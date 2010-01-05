@@ -141,7 +141,7 @@ get(Key, Store) ->
     erlang:port_control(Store#store.port, ?CMD_GET, Args),
     receive
         {innostore_ok, not_found} ->
-            {error, notfound};
+            {ok, not_found};
         {innostore_ok, Value} ->
             {ok, Value};
         {innostore_error, Reason} ->
@@ -381,7 +381,7 @@ roundtrip_test_op(Compression) ->
     ok = ?MODULE:put(<<"key1">>, <<"value1">>, S2),
     {ok, <<"value1">>} = ?MODULE:get(<<"key1">>, S2),
     ok = ?MODULE:delete(<<"key1">>, S2),
-    {error, notfound} = ?MODULE:get(<<"key1">>, S2),
+    {ok, not_found} = ?MODULE:get(<<"key1">>, S2),
     ok.
 
 list_tables_test() ->
