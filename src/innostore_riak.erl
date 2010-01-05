@@ -23,7 +23,7 @@
 -author('Dave Smith <dizzyd@basho.com>').
 
 %% Public API for riak
--export([start/1,
+-export([start/2,
          stop/1,
          get/2,
          put/3,
@@ -43,7 +43,7 @@
 %% Public API
 %% ===================================================================
 
-start(Partition) ->
+start(Partition, _Config) ->
     case innostore:connect() of
         {ok, Port} ->
             PartitionStr = <<"_", (list_to_binary(integer_to_list(Partition)))/binary>>,
@@ -57,10 +57,10 @@ stop(State) ->
 
 get(State, {Bucket, Key}) ->
     case innostore:get(Key, keystore(Bucket, State)) of
-        {ok, Value} ->
-            {ok, Value};
         {ok, not_found} ->
             {error, notfound};
+        {ok, Value} ->
+            {ok, Value};
         {error, Reason} ->
             {error, Reason}
     end.
@@ -135,8 +135,8 @@ reset() ->
 
 bucket_list_test() ->
     reset(),
-    {ok, S1} = start(0),
-    {ok, S2} = start(1),
+    {ok, S1} = start(0, undefined),
+    {ok, S2} = start(1, undefined),
 
     ok = ?MODULE:put(S1, {?TEST_BUCKET, <<"key1">>}, <<"abcdef">>),
     ok = ?MODULE:put(S2, {?TEST_BUCKET, <<"key2">>}, <<"dasdf">>),
