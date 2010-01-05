@@ -1,0 +1,6 @@
+c_src/innodb/.*$
+c_src/embedded_innodb-.*/.*$
+.eunit/.*$
+c_src/.*\.o$
+priv/.*\.so$
+ebin/.*\.beam$
