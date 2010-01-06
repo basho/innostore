@@ -53,7 +53,7 @@ start(Partition, _Config) ->
     end.
 
 stop(State) ->
-    innostore:close(State#state.port).
+    innostore:disconnect(State#state.port).
 
 get(State, {Bucket, Key}) ->
     case innostore:get(Key, keystore(Bucket, State)) of
