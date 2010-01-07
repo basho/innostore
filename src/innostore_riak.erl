@@ -73,17 +73,20 @@ delete(State, {Bucket, Key}) ->
 
 list(State) ->
     %% List all keys in all buckets
-    list_keys(list_buckets(State), [], State).
+    list_keys(true, list_buckets(State), [], State).
 
 list_bucket(State, Bucket) ->
     %% List all keys in a bucket
     Name = <<Bucket/binary, (State#state.partition_str)/binary>>,
-    list_keys([Name], [], State).
+    list_keys(false, [Name], [], State).
 
 
 %% ===================================================================
 %% Internal functions
 %% ===================================================================
+
+key_entry(undefined,Key) -> Key;
+key_entry(Bucket,Key) -> {Bucket,Key}.    
 
 keystore(Bucket, State) ->
     Name = <<Bucket/binary, (State#state.partition_str)/binary>>,
@@ -101,16 +104,20 @@ list_buckets(State) ->
     [T || T <- innostore:list_keystores(State#state.port),
          lists:suffix(Suffix, T) == true].
 
-list_keys([], Acc, _State) ->
+list_keys(_IncludeBucket, [], Acc, _State) ->
     Acc;
-list_keys([Name | Rest], Acc, State) ->
-    Bucket = bucket_from_tablename(Name),
+list_keys(IncludeBucket, [Name | Rest], Acc, State) ->
+    Bucket = case IncludeBucket of
+        true -> bucket_from_tablename(Name);
+        false -> undefined
+    end,
     {ok, Store} = innostore:open_keystore(Name, State#state.port),
-    case innostore:fold_keys(fun(K, Acc1) -> [{Bucket, K} | Acc1] end, Acc, Store) of
+    case innostore:fold_keys(fun(K, Acc1) -> [key_entry(Bucket, K) | Acc1] end,
+                             Acc, Store) of
         {error, Reason} ->
             {error, Reason};
         Acc2 ->
-            list_keys(Rest, Acc2, State)
+            list_keys(IncludeBucket, Rest, Acc2, State)
     end.
 
 
