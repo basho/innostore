@@ -29,7 +29,8 @@
          put/3,
          delete/2,
          list/1,
-         list_bucket/2]).
+         list_bucket/2,
+         fold/3]).
 
 
 -ifdef(TEST).
@@ -120,6 +121,12 @@ list_keys(IncludeBucket, [Name | Rest], Acc, State) ->
             list_keys(IncludeBucket, Rest, Acc2, State)
     end.
 
+fold(State, Fun, Acc0) ->
+    lists:flatten(
+      [innostore:fold(Fun, Acc0, keystore(bucket_from_tablename(B), State)) || 
+          B <- list_buckets(State)]).
+    
+
 
 bucket_from_tablename(TableName) ->
     {match, [Name]} = re:run(TableName, "(.*)_\\d+", [{capture, all_but_first, binary}]),
@@ -154,6 +161,19 @@ bucket_list_test() ->
 
     [{?TEST_BUCKET, <<"key1">>}, {?OTHER_TEST_BUCKET, <<"key1">>}] = ?MODULE:list(S1),
     [{?TEST_BUCKET, <<"key2">>}] = ?MODULE:list(S2).
+
+
+fold_test() ->
+    reset(),
+    {ok, S} = start(2, undefined),
+    ok = ?MODULE:put(S, {?TEST_BUCKET, <<"1">>}, <<"abcdef">>),
+    ok = ?MODULE:put(S, {?TEST_BUCKET, <<"2">>}, <<"foo">>),
+    ok = ?MODULE:put(S, {?TEST_BUCKET, <<"3">>}, <<"bar">>),
+    ok = ?MODULE:put(S, {?TEST_BUCKET, <<"4">>}, <<"baz">>),
+    [{<<"4">>, <<"baz">>},
+     {<<"3">>, <<"bar">>},
+     {<<"2">>, <<"foo">>},
+     {<<"1">>, <<"abcdef">>}] = ?MODULE:fold(S, fun(K,V,A)->[{K,V}|A] end, []).
 
 
 -endif.
