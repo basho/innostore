@@ -26,6 +26,7 @@
 -export([connect/0,
          disconnect/1,
          open_keystore/2,
+         is_keystore_empty/2,
          list_keystores/1,
          drop_keystore/2,
          get/2,
@@ -113,6 +114,22 @@ open_keystore(Name, Port) when is_binary(Name) ->
                           table_id = TableId }};
 
         {innostore_error, Reason}->
+            {error, Reason}
+    end.
+
+is_keystore_empty(Name, Port) ->
+    case open_keystore(Name, Port) of
+        {ok, Store} ->
+            ok = cursor_open(Store),
+            case cursor_move(?CURSOR_FIRST, ?CONTENT_KEY_ONLY, Store) of
+                {ok, eof} ->
+                    Result = true;
+                _ ->
+                    Result = false
+            end,
+            ok = cursor_close(Store),
+            Result;
+        {error, Reason} ->
             {error, Reason}
     end.
 
@@ -390,5 +407,14 @@ list_tables_test() ->
     {ok, _} = open_keystore(barbaz, Port),
     {ok, _} = open_keystore(bazbaz, Port),
     ["barbaz", "bazbaz", "foobar"] = lists:sort(list_keystores(Port)).
+
+table_is_empty_test() ->
+    {ok, Port} = connect_reset(),
+    {ok, Store} = open_keystore(foobar, Port),
+    ok = ?MODULE:put(<<"abc">>, <<"def">>, Store),
+    false = is_keystore_empty(foobar, Port),
+    ok = ?MODULE:delete(<<"abc">>, Store),
+    true = is_keystore_empty(foobar, Port),
+    true = is_keystore_empty(nosuchtable, Port).
 
 -endif.
