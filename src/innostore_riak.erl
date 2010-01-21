@@ -30,7 +30,9 @@
          delete/2,
          list/1,
          list_bucket/2,
-         fold/3]).
+         fold/3,
+         is_empty/1,
+         drop/1]).
 
 
 -ifdef(TEST).
@@ -128,8 +130,17 @@ fold(State, Fun0, Acc0) ->
                  Fun0({bucket_from_tablename(B),K},V,A) end,
          Acc0, keystore(bucket_from_tablename(B), State)) || 
           B <- list_buckets(State)]).
-    
 
+is_empty(State) ->    
+    lists:all(fun(I) -> I end,
+              [innostore:is_keystore_empty(B,
+                                           State#state.port) || 
+                  B <- list_buckets(State)]).
+
+drop(State) ->
+    KSes = list_buckets(State),
+    [innostore:drop_keystore(K, State#state.port) || K <- KSes],
+    ok.
 
 bucket_from_tablename(TableName) ->
     {match, [Name]} = re:run(TableName, "(.*)_\\d+", [{capture, all_but_first, binary}]),
