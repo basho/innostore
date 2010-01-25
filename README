@@ -1,0 +1,21 @@
+Innostore is a simple Erlang API to Embedded InnoDB.
+
+Innostore does not attempt to provide the same API as Inno itself, but
+instead provides a simpler interface which is sufficient for many
+uses.  This interface is exported by the "innostore" module of the
+"innostore" application.
+
+An example of use of that interface can be found in the
+"innostore_riak" module, which is a valid Riak backend module using
+innostore for storage.
+
+While InnoDB can be extremely fast for a durable store, the
+performance (with or without the innostore API) is highly dependent on
+tuning the local configuration to match the local hardware.  Most of
+the useful tuning parameters are exposed as application variables in
+the innostore app.  Some examples of tuning:
+ - keep data_home_dir and log_group_home_dir on separate disks if possible
+ - make buffer_pool_size as large as possible but less than available RAM
+(There are many other variables which you are likely to want to tune,
+but this is not the place for an extensive InnoDB tuning tutorial)
+
