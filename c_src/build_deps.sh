@@ -25,8 +25,12 @@ case "$1" in
         # Rebar sets up a custom env that we really don't want
         unset CFLAGS CXXFLAGS LDFLAGS
 
+       if [ "`uname`" == "SunOS" ]; then
+               export CFLAGS="-D_REENTRANT -m64"
+       fi
+
         (cd embedded_innodb-$INNO_VSN && \
-            ./configure --disable-shared --enable-static \
+            ./configure --disable-shared --enable-static --with-pic \
                         --prefix=$BASEDIR/innodb && \
             make && make install)
 
