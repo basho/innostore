@@ -153,6 +153,8 @@ drop_keystore(Name, Port) ->
     end.
 
 
+get(Key, Store) when size(Key) > 255 ->
+    {error, key_exceeds_255_bytes};
 get(Key, Store) ->
     Args = <<(Store#store.table_id)/binary, (size(Key)):8, Key/binary>>,
     erlang:port_control(Store#store.port, ?CMD_GET, Args),
@@ -166,6 +168,8 @@ get(Key, Store) ->
     end.
 
 
+put(Key, Value, Store) when size(Key) > 255 ->
+    {error, key_exceeds_255_bytes};
 put(Key, Value, Store) ->
     Args = <<(Store#store.table_id)/binary, (Store#store.compression):8,
             (size(Key)):8, Key/binary,
@@ -178,6 +182,8 @@ put(Key, Value, Store) ->
             {error, Reason}
     end.
 
+delete(Key, Store) when size(Key) > 255 ->
+    {error, key_exceeds_255_bytes};
 delete(Key, Store) ->
     Args = <<(Store#store.table_id)/binary, (size(Key)):8, Key/binary>>,
     erlang:port_control(Store#store.port, ?CMD_DELETE, Args),
@@ -416,5 +422,11 @@ table_is_empty_test() ->
     ok = ?MODULE:delete(<<"abc">>, Store),
     true = is_keystore_empty(foobar, Port),
     true = is_keystore_empty(nosuchtable, Port).
+
+bigkey_test() ->
+    {ok, Port} = connect_reset(),
+    {ok, Store} = open_keystore(foobar, Port),
+    Key = list_to_binary(lists:duplicate(256, "x")),
+    {error, key_exceeds_255_bytes} = ?MODULE:put(Key, <<"abc">>, Store).
 
 -endif.
