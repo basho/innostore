@@ -503,7 +503,7 @@ static void do_get(void* arg)
     // table - 8 bytes
     // keysz - 1 byte
     // key   - variable
-    ib_id_t table      = UNPACK_UINT64(state->work_buffer, 0);
+    ib_id_t table      ; UNPACK_INT(state->work_buffer, 0, &table);
     unsigned int keysz = UNPACK_BYTE(state->work_buffer, sizeof(table));
     char* key          = UNPACK_BLOB(state->work_buffer, sizeof(table)+1);
 
@@ -593,11 +593,11 @@ static void do_put(void* arg)
     // key     - variable
     // valuesz - 4 bytes
     // value   - variable
-    ib_id_t table            = UNPACK_UINT64(state->work_buffer, 0);
+    ib_id_t table            ; UNPACK_INT(state->work_buffer, 0, &table);
     unsigned int cflag       = UNPACK_BYTE(state->work_buffer, sizeof(table));
     unsigned int keysz       = UNPACK_BYTE(state->work_buffer, sizeof(table) + 1);
     char* key                = UNPACK_BLOB(state->work_buffer, sizeof(table) + 2);
-    unsigned int raw_valuesz = UNPACK_INT(state->work_buffer,  sizeof(table) + 2 + keysz);
+    unsigned int raw_valuesz;  UNPACK_INT(state->work_buffer,  sizeof(table) + 2 + keysz, &raw_valuesz);
     char* raw_value          = UNPACK_BLOB(state->work_buffer, sizeof(table) + 2 + keysz + 4);
 
     unsigned int valuesz;
@@ -710,7 +710,7 @@ static void do_delete(void* arg)
     // table   - 8 bytes
     // keysz   - 1 byte
     // key     - variable
-    ib_id_t table        = UNPACK_UINT64(state->work_buffer, 0);
+    ib_id_t table        ; UNPACK_INT(state->work_buffer, 0, &table);
     unsigned int keysz   = UNPACK_BYTE(state->work_buffer, sizeof(table));
     char* key            = UNPACK_BLOB(state->work_buffer, sizeof(table) + 1);
 
@@ -807,7 +807,7 @@ static void do_cursor_open(void* arg)
     PortState* state = (PortState*)arg;
 
     // Unpack the table ID to scan
-    ib_id_t table = UNPACK_UINT64(state->work_buffer, 0);
+    ib_id_t table ; UNPACK_INT(state->work_buffer, 0, &table);
 
     // Start the txn and open a cursor for the table.
     state->txn = ib_trx_begin(IB_TRX_READ_UNCOMMITTED);

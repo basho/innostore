@@ -102,9 +102,8 @@ typedef struct
  * Helpful macros (from github/toland/bdberl)
  */
 #define UNPACK_BYTE(_buf, _off) (_buf[_off])
-#define UNPACK_INT(_buf, _off) *((int*)(_buf+(_off)))
+#define UNPACK_INT(_buf, _off, _int_ptr)    (memcpy((void*)_int_ptr, (_buf+_off), sizeof(*_int_ptr)))
 #define UNPACK_STRING(_buf, _off) (char*)(_buf+(_off))
 #define UNPACK_BLOB(_buf, _off) (void*)(_buf+(_off))
-#define UNPACK_UINT64(_buf, _off) *((uint64_t*)(_buf+(_off)))
 
 #endif
