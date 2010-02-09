@@ -392,7 +392,9 @@ static void do_set_cfg(void* arg)
         }
         else
         {
-            error = ib_cfg_set(key, *(ErlDrvUInt*)value);
+            ErlDrvUInt value_i;
+            UNPACK_INT(state->work_buffer, strlen(key)+1, &value_i);
+            error = ib_cfg_set(key, value_i);
         }
 
         if (error == DB_SUCCESS)
