@@ -4,3 +4,7 @@ all:
 
 clean:
 	./rebar clean
+
+install:
+	./rebar install
+
