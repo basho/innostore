@@ -10,6 +10,47 @@ is exported by the "innostore" module of the "innostore" application.
 An example of use of that interface can be found in the "innostore_riak" module,
 which is a valid Riak backend module using innostore for storage.
 
+Installation
+------------
+* Download or clone the innostore project from http://hg.basho.com/innostore.
+
+* In the innostore directory, build it:
+  $ make
+
+* Option 1: Install innostore into your Erlang distribution:
+  $ make install
+
+* Option 2: Install innostore into an existing Riak build:
+
+  ** Create an "innostore" directory in the riak/lib directory
+  $ mkdir -p riak/lib/innostore
+
+  ** Copy the innostore ebin and priv directories into riak/lib/innostore
+  $ cp -R innostore/ebin innostore/priv riak/lib/innostore
+
+  ** Finally, configure riak to use innostore in app.config by setting
+     the storage_backend. Change riak/etc/app.config:
+
+     {storage_backend, innostore_riak}
+
+  ** You may wish to also tune the innostore engine. Add a innostore
+     application section to the riak/etc/app.config file:
+
+     %% Inno db config
+     {innostore, [
+                  {data_home_dir,            "/mnt/innodb"},
+                  {log_group_home_dir,       "/mnt/innodb"},
+                  {buffer_pool_size,         2147483648}, %% 2G of buffer
+                  {thread_concurrency,       0},
+                  {flush_log_at_trx_commit,  2},
+                  {max_dirty_pages_pct,      75},
+                  {thread_sleep_delay,       10}
+                 ]}
+
+
+Tuning
+------
+
 While InnoDB can be extremely fast for a durable store, its performance is
 highly dependent on tuning the configuration to match the hardware and
 dataset. All the configuration is available as application variables in the
