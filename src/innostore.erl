@@ -225,8 +225,8 @@ ensure_app_loaded() ->
             case application:load(?MODULE) of
                 ok ->
                     ok;
-                Other ->
-                    error_logger:info_msg("Innostore app config NOT loaded; default config in use: ~p\n", [Other])
+                {error, _Reason} ->
+                    error_logger:info_msg("Using default Innostore configuration.\n")
             end
     end.
 

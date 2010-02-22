@@ -40,11 +40,7 @@ Installation
      {innostore, [
                   {data_home_dir,            "/mnt/innodb"},
                   {log_group_home_dir,       "/mnt/innodb"},
-                  {buffer_pool_size,         2147483648}, %% 2G of buffer
-                  {thread_concurrency,       0},
-                  {flush_log_at_trx_commit,  2},
-                  {max_dirty_pages_pct,      75},
-                  {thread_sleep_delay,       10}
+                  {buffer_pool_size,         2147483648} %% 2G of buffer
                  ]}
 
 
@@ -61,11 +57,6 @@ innostore applications cope. An example configuration follows:
              {data_home_dir,            "/innodb"},     %% Where data files go
              {log_group_home_dir,       "/innodb-log"}, %% Where log files go
              {buffer_pool_size,         2147483648},    %% 2G in-memory buffer in bytes
-             {thread_concurrency,       0},             %% Permit any # of threads in inno DB runtime at once
-             {flush_log_at_trx_commit,  0},             %% Flush pending log commits once per second
-             {max_dirty_pages_pct,      75},            %% Reduce frequency at which dirty pages are flushed
-             {thread_sleep_delay,       10}             %% Reduce penalty for attempting to grab lock
-             {log_buffer_size,          8388608},       %% Don't change this
              {log_files_in_group,       6},             %% How many files you need -- usually, 3 < x < 6
              {log_file_size,            134217728}      %% No bigger than 256MB
             ]},
@@ -73,8 +64,6 @@ innostore applications cope. An example configuration follows:
 In general, only the first three parameters (data_home_dir, log_group_home_dir
 and buffer_pool_size) will need to be changed. It is strongly recommended that
 the data home dir and log home dir are kept on separate spindles/drives.
-
-The data_home_dir and log_group_home_dir MUST exist before starting innostore.
 
 The buffer_pool_size determines how much data Inno tries to keep in memory at
 once. Obviously, the more of your dataset that can fit in RAM, the better Inno
