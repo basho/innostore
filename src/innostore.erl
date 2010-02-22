@@ -153,7 +153,7 @@ drop_keystore(Name, Port) ->
     end.
 
 
-get(Key, Store) when size(Key) > 255 ->
+get(Key, _Store) when size(Key) > 255 ->
     {error, key_exceeds_255_bytes};
 get(Key, Store) ->
     Args = <<(Store#store.table_id)/binary, (size(Key)):8, Key/binary>>,
@@ -168,7 +168,7 @@ get(Key, Store) ->
     end.
 
 
-put(Key, Value, Store) when size(Key) > 255 ->
+put(Key, _Value, _Store) when size(Key) > 255 ->
     {error, key_exceeds_255_bytes};
 put(Key, Value, Store) ->
     Args = <<(Store#store.table_id)/binary, (Store#store.compression):8,
@@ -182,7 +182,7 @@ put(Key, Value, Store) ->
             {error, Reason}
     end.
 
-delete(Key, Store) when size(Key) > 255 ->
+delete(Key, _Store) when size(Key) > 255 ->
     {error, key_exceeds_255_bytes};
 delete(Key, Store) ->
     Args = <<(Store#store.table_id)/binary, (size(Key)):8, Key/binary>>,
