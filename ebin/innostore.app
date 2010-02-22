@@ -12,6 +12,9 @@
                   crypto
                  ]},
   {registered, []},
-  {env, []}
+  {env, [
+         {log_group_home_dir, "."},
+         {data_home_dir, "."}
+        ]}
  ]}.
 

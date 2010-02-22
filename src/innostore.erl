@@ -240,7 +240,13 @@ set_config([{Key, Value} | Rest], Port) when is_atom(Key) ->
             erlang:port_control(Port, ?CMD_SET_CFG, <<KBin/binary, 0:8, VBin/binary>>),
             receive
                 innostore_ok ->
-                    ok;
+                    case on_set_config(Key, Value) of
+                        ok ->
+                            ok;
+                        {error, Reason} ->
+                            error_logger:error_msg("Failed to post-process value for ~p = ~p: ~p\n",
+                                                   [Key, Value, Reason])
+                    end;
                 {innostore_error, Reason} ->
                     error_logger:error_msg("Failed to set value for ~p = ~p: ~p\n", [Key, Value, Reason])
             end;
@@ -252,6 +258,14 @@ set_config([Other | Rest], Port) ->
     error_logger:info_msg("Skipping config setting ~p for innostore; not {atom, list} pair.\n",
                           [Other]),
     set_config(Rest, Port).
+
+%%
+%% Post process values set in the config
+%%
+on_set_config(Key, Dir) when Key == log_group_home_dir; Key == data_home_dir ->
+    filelib:ensure_dir(filename:join(Dir, "foo"));
+on_set_config(_Key, _Value) ->
+    ok.
 
 
 list_keystores_loop(Acc) ->
