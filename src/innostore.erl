@@ -441,6 +441,9 @@ bigkey_test() ->
     {ok, Port} = connect_reset(),
     {ok, Store} = open_keystore(foobar, Port),
     Key = list_to_binary(lists:duplicate(256, "x")),
-    {error, key_exceeds_255_bytes} = ?MODULE:put(Key, <<"abc">>, Store).
+    {error, key_exceeds_255_bytes} = ?MODULE:put(Key, <<"abc">>, Store),
+
+    Key2 = list_to_binary(lists:duplicate(153, "x")),
+    ok = ?MODULE:put(Key2, <<"abc">>, Store).
 
 -endif.

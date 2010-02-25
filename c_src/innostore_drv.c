@@ -506,7 +506,7 @@ static void do_get(void* arg)
     // keysz - 1 byte
     // key   - variable
     ib_id_t table      ; UNPACK_INT(state->work_buffer, 0, &table);
-    unsigned int keysz = UNPACK_BYTE(state->work_buffer, sizeof(table));
+    unsigned char keysz = UNPACK_BYTE(state->work_buffer, sizeof(table));
     char* key          = UNPACK_BLOB(state->work_buffer, sizeof(table)+1);
 
     ib_trx_t txn = ib_trx_begin(IB_TRX_REPEATABLE_READ);
@@ -596,8 +596,8 @@ static void do_put(void* arg)
     // valuesz - 4 bytes
     // value   - variable
     ib_id_t table            ; UNPACK_INT(state->work_buffer, 0, &table);
-    unsigned int cflag       = UNPACK_BYTE(state->work_buffer, sizeof(table));
-    unsigned int keysz       = UNPACK_BYTE(state->work_buffer, sizeof(table) + 1);
+    unsigned char cflag      = UNPACK_BYTE(state->work_buffer, sizeof(table));
+    unsigned char keysz      = UNPACK_BYTE(state->work_buffer, sizeof(table) + 1);
     char* key                = UNPACK_BLOB(state->work_buffer, sizeof(table) + 2);
     unsigned int raw_valuesz;  UNPACK_INT(state->work_buffer,  sizeof(table) + 2 + keysz, &raw_valuesz);
     char* raw_value          = UNPACK_BLOB(state->work_buffer, sizeof(table) + 2 + keysz + 4);
@@ -713,7 +713,7 @@ static void do_delete(void* arg)
     // keysz   - 1 byte
     // key     - variable
     ib_id_t table        ; UNPACK_INT(state->work_buffer, 0, &table);
-    unsigned int keysz   = UNPACK_BYTE(state->work_buffer, sizeof(table));
+    unsigned char keysz  = UNPACK_BYTE(state->work_buffer, sizeof(table));
     char* key            = UNPACK_BLOB(state->work_buffer, sizeof(table) + 1);
 
     ib_trx_t txn = ib_trx_begin(IB_TRX_SERIALIZABLE);
@@ -830,8 +830,8 @@ static void do_cursor_move(void* arg)
     // Unpack the type of move, and what data to return (key or key+data)
     // movement - 1 byte
     // content - 1 byte
-    unsigned int movement = UNPACK_BYTE(state->work_buffer, 0);
-    unsigned int content  = UNPACK_BYTE(state->work_buffer, 1);
+    unsigned char movement = UNPACK_BYTE(state->work_buffer, 0);
+    unsigned char content  = UNPACK_BYTE(state->work_buffer, 1);
 
     ib_err_t error;
     switch(movement)
