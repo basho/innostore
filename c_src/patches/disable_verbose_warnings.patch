@@ -1,0 +1,15 @@
+diff -ur embedded_innodb-1.0.6.6750.orig/include/api0api.h embedded_innodb-1.0.6.6750/include/api0api.h
+--- embedded_innodb-1.0.6.6750.orig/include/api0api.h	2010-02-22 05:57:13.000000000 -0700
++++ embedded_innodb-1.0.6.6750/include/api0api.h	2010-03-01 10:14:09.000000000 -0700
+@@ -29,11 +29,7 @@
+ #define strcasecmp		_stricmp
+ #endif
+ 
+-#if defined(__GNUC__) && (__GNUC__ > 2) && ! defined(__INTEL_COMPILER)
+-#define UNIV_NO_IGNORE		__attribute__ ((warn_unused_result))
+-#else
+ #define UNIV_NO_IGNORE
+-#endif /* __GNUC__ && __GNUC__ > 2 && !__INTEL_COMPILER */
+ 
+ /* See comment about ib_bool_t as to why the two macros are unsigned long. */
+ /** The boolean value of "true" used internally within InnoDB */

@@ -156,7 +156,10 @@ static int innostore_drv_init()
     G_ENGINE_STATE_LOCK = erl_drv_mutex_create("innostore_state_lock");
 
     // Initialize Inno's memory subsystem
-    ib_init();
+    if (ib_init() != DB_SUCCESS)
+    {
+        return -1;
+    }
 
     return 0;
 }
@@ -169,7 +172,11 @@ static void innostore_drv_finish()
     // the calling VM thread and may be a long running operation.
     if (G_ENGINE_STATE == ENGINE_STARTED)
     {
-        ib_shutdown();
+        ib_err_t result = ib_shutdown(IB_SHUTDOWN_NORMAL);
+        if (result != DB_SUCCESS)
+        {
+            printf("ib_shutdown failed: %s\n", ib_strerror(result));
+        }
     }
 
     G_ENGINE_STATE = ENGINE_STOPPED;
@@ -447,13 +454,13 @@ static void do_init_table(void* arg)
     char* table = UNPACK_STRING(state->work_buffer, 0);
     ib_id_t table_id;
 
-    // Start a txn for schema access and be sure to make it serializable
-    ib_trx_t txn = ib_trx_begin(IB_TRX_SERIALIZABLE);
-    ib_schema_lock_exclusive(txn);
-
     // If the table doesn't exist, create it
-    if (ib_check_if_table_exists(table, &table_id) == DB_TABLE_NOT_FOUND)
+    if (ib_table_get_id(table, &table_id) != DB_SUCCESS)
     {
+        // Start a txn for schema access and be sure to make it serializable
+        ib_trx_t txn = ib_trx_begin(IB_TRX_SERIALIZABLE);
+        ib_schema_lock_exclusive(txn);
+
         // Make sure the innokeystore database exists
         // TODO: Avoid hard-coding the db name here...
         ib_database_create("innokeystore");
@@ -461,7 +468,7 @@ static void do_init_table(void* arg)
         // Create the table schema
         ib_tbl_sch_t schema;
         ib_table_schema_create(table, &schema, IB_TBL_COMPACT, 0);
-        ib_table_schema_add_col(schema, "key", IB_NOT_USED2, IB_COL_NONE, 0, 255);
+        ib_table_schema_add_col(schema, "key", IB_VARBINARY, IB_COL_NONE, 0, 255);
         ib_table_schema_add_col(schema, "value", IB_BLOB, IB_COL_NONE, 0, 0);
 
         // Create primary index on key
@@ -476,7 +483,12 @@ static void do_init_table(void* arg)
         // Release the schema -- doesn't matter if table was created or not at this point
         ib_schema_unlock(txn);
 
-        if (rc != DB_SUCCESS)
+        if (rc == DB_SUCCESS)
+        {
+            // Commit changes to schema (if any)
+            ib_trx_commit(txn);
+        }
+        else
         {
             // Failed to create table -- rollback and exit
             ib_trx_rollback(txn);
@@ -484,9 +496,6 @@ static void do_init_table(void* arg)
             return;
         }
     }
-
-    // Commit changes to schema (if any)
-    ib_trx_commit(txn);
 
     // Guaranteed at this point to have a valid table_id
     ErlDrvTermData response[] = { ERL_DRV_ATOM,   driver_mk_atom("innostore_ok"),
@@ -953,14 +962,34 @@ static void do_drop_table(void* arg)
     PortState* state = (PortState*)arg;
 
     char* table = UNPACK_STRING(state->work_buffer, 0);
-    ib_err_t error = ib_table_drop(table);
-    if (error == DB_SUCCESS)
+
+    // Use a serializable txn as this is a schema op. Also be sure to lock
+    // our schema exclusively, per docs.
+    ib_trx_t txn = ib_trx_begin(IB_TRX_SERIALIZABLE);
+
+    ib_err_t rc = ib_schema_lock_exclusive(txn);
+    FAIL_ON_ERROR(rc,
+                  {
+                      send_error_str(state, ib_strerror(rc));
+                      ROLLBACK_RETURN(txn);
+                  });
+
+    // Do the actual drop
+    rc = ib_table_drop(txn, table);
+
+    // Go ahead and unlock the schema -- this has to be done no matter the outcome.
+    ib_schema_unlock(txn);
+
+    // If everything went well, commit; otherwise rollback
+    if (rc == DB_SUCCESS)
     {
+        ib_trx_commit(txn);
         send_ok(state);
     }
     else
     {
-        send_error_str(state, ib_strerror(error));
+        ib_trx_rollback(txn);
+        send_error_str(state, ib_strerror(rc));
     }
 }
 

@@ -2,7 +2,7 @@
 
 set -e
 
-INNO_VSN=1.0.3.5325
+INNO_VSN=1.0.6.6750
 
 if [ `basename $PWD` != "c_src" ]; then
     pushd c_src
@@ -18,6 +18,7 @@ case "$1" in
     *)
         tar -xzf embedded_innodb-$INNO_VSN.tar.gz
         for x in patches/*; do
+            echo $x
             patch -p0 < $x
         done
 
