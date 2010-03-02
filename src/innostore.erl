@@ -236,7 +236,7 @@ set_config([{Key, Value} | Rest], Port) when is_atom(Key) ->
     case lists:keysearch(Key, 1, config_types()) of
         {value, {Key, Type}} ->
             KBin = atom_to_binary(Key, utf8),
-            VBin = config_encode(Type, Value),
+            VBin = config_encode(Type, Key, Value),
             erlang:port_control(Port, ?CMD_SET_CFG, <<KBin/binary, 0:8, VBin/binary>>),
             receive
                 innostore_ok ->
@@ -379,16 +379,20 @@ config_types() ->
 %%
 %% Encode configuration setting, based on type for passing through to inno api
 %%
-config_encode(integer, Value) ->
+config_encode(integer, _Key, Value) ->
     case erlang:system_info(wordsize) of
         4 -> <<Value:32/unsigned-native>>;
         8 -> <<Value:64/unsigned-native>>
     end;
-config_encode(bool, true) ->
-    config_encode(integer, 1);
-config_encode(bool, false) ->
-    config_encode(integer, 0);
-config_encode(string, Value) ->
+config_encode(bool, Key, true) ->
+    config_encode(integer, Key, 1);
+config_encode(bool, Key, false) ->
+    config_encode(integer, Key, 0);
+config_encode(string, data_home_dir, Value) ->
+    %% Make sure that the last character is a path separator
+    CleanedUp = filename:absname(Value) ++ "/",
+    <<(list_to_binary(CleanedUp))/binary, 0:8>>;
+config_encode(string, _Key, Value) ->
     <<(list_to_binary(Value))/binary, 0:8>>.
 
 

@@ -395,7 +395,13 @@ static void do_set_cfg(void* arg)
     {
         if (key_type == IB_CFG_TEXT)
         {
-            error = ib_cfg_set(key, value);
+            // HACK: Semantics of setting a text configuration value for innodb changed
+            // to be pointer assignment (from copy) for vsn 1.0.6.6750. So, we strdup the
+            // value to ensure everything works as expected.
+            // TODO: Setup some sort of list of strdup'd values to ensure they all get
+            // cleaned up properly. In typical usage, this isn't going to be a problem
+            // as you only initialize once per run, but it bothers me just the same.
+            error = ib_cfg_set(key, strdup(value));
         }
         else
         {
