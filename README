@@ -22,27 +22,23 @@ Installation
 
 * Option 2: Install innostore into an existing Riak build:
 
-  ** Create an "innostore" directory in the riak/lib directory
-  $ mkdir -p riak/lib/innostore
+  ** Use rebar to install into your Riak lib directory 
+  $ ./rebar install target=$RIAK/lib
 
-  ** Copy the innostore ebin and priv directories into riak/lib/innostore
-  $ cp -R innostore/ebin innostore/priv riak/lib/innostore
+* Finally, configure riak to use innostore in app.config by setting
+  the storage_backend. Change riak/etc/app.config:
 
-  ** Finally, configure riak to use innostore in app.config by setting
-     the storage_backend. Change riak/etc/app.config:
+  {storage_backend, innostore_riak}
 
-     {storage_backend, innostore_riak}
+* You may wish to also tune the innostore engine. Add a innostore
+  application section to the riak/etc/app.config:
 
-  ** You may wish to also tune the innostore engine. Add a innostore
-     application section to the riak/etc/app.config file:
-
-     %% Inno db config
-     {innostore, [
-                  {data_home_dir,            "/mnt/innodb"},
-                  {log_group_home_dir,       "/mnt/innodb"},
-                  {buffer_pool_size,         2147483648} %% 2G of buffer
-                 ]}
-
+  %% Inno db config
+  {innostore, [
+               {data_home_dir,            "/mnt/innodb"},
+               {log_group_home_dir,       "/mnt/innodb"},
+               {buffer_pool_size,         2147483648} %% 2G of buffer
+              ]}
 
 Tuning
 ------
