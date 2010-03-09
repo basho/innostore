@@ -1,6 +1,6 @@
 {application, innostore,
  [{description, "Simple Erlang API to Embedded Inno DB"},
-  {vsn, "8"},
+  {vsn, "9"},
   {modules, [
              innostore,
              innostore_riak
