@@ -24,6 +24,8 @@
 #include <assert.h>
 #include <errno.h>
 #include <string.h>
+#include <stdarg.h>
+#include <termios.h>
 
 /**
  * Erlang driver functions
@@ -109,6 +111,12 @@ static int compress(unsigned int cflag,
 static int decompress(PortState* state, char* in_value, unsigned int in_value_sz,
                       char** out_value, unsigned int* out_value_sz);
 
+/**
+ * Logging
+ */
+static void set_log_file(const char* filename);
+static int raw_logger(ib_msg_stream_t stream, const char* fmt, ...);
+
 
 /**
  * Globals for inno mgmt -- need to ensure engine only gets started/configured once per VM.
@@ -119,6 +127,14 @@ static int decompress(PortState* state, char* in_value, unsigned int in_value_sz
 
 static int          G_ENGINE_STATE = 0;
 static ErlDrvMutex* G_ENGINE_STATE_LOCK;
+
+/**
+ * Globals for inno logging */
+
+static ErlDrvMutex* G_LOGGER_LOCK;
+static char*        G_LOGGER_BUF = NULL;
+static size_t       G_LOGGER_SIZE = 0;
+static FILE*        G_LOGGER_FH = NULL;
 
 /**
  * Column IDs
@@ -154,12 +170,16 @@ DRIVER_INIT(innostore_drv)
 static int innostore_drv_init()
 {
     G_ENGINE_STATE_LOCK = erl_drv_mutex_create("innostore_state_lock");
+    G_LOGGER_LOCK = erl_drv_mutex_create("innostore_logger_lock");
 
     // Initialize Inno's memory subsystem
     if (ib_init() != DB_SUCCESS)
     {
         return -1;
     }
+
+    // Set up the logger
+    set_log_file(NULL);
 
     return 0;
 }
@@ -178,6 +198,21 @@ static void innostore_drv_finish()
             printf("ib_shutdown failed: %s\n", ib_strerror(result));
         }
     }
+
+    // Clean up logging after inno has shutdown completely
+    erl_drv_mutex_destroy(G_LOGGER_LOCK); 
+    if (G_LOGGER_BUF != NULL)
+    {
+        driver_free(G_LOGGER_BUF);
+        G_LOGGER_BUF = NULL;
+        G_LOGGER_SIZE = 0;
+    }
+    if (G_LOGGER_FH != NULL)
+    {
+        fclose(G_LOGGER_FH);
+        G_LOGGER_FH = NULL;
+    }
+
 
     G_ENGINE_STATE = ENGINE_STOPPED;
 }
@@ -1038,6 +1073,129 @@ static int decompress(PortState* state, char* in_value, unsigned int in_value_sz
         return -1;
     }
 }
+
+static void set_log_file(const char* filename)
+{
+    int open_errno = 0;
+    ib_msg_log_t logger_fn = fprintf;
+    ib_msg_stream_t logger_fh = stderr;
+
+    erl_drv_mutex_lock(G_LOGGER_LOCK);
+
+    /* Close any open log file */
+    if (G_LOGGER_FH != NULL)
+    {
+        fclose(G_LOGGER_FH);
+        G_LOGGER_FH = NULL;
+    }
+
+    /* If filename is non-NULL and non-empty, log to that file
+    */
+    if (filename != NULL && *filename != '\0')
+    {
+        G_LOGGER_FH = fopen(filename, "a");
+        if (G_LOGGER_FH == NULL)
+        {
+            open_errno = errno;
+        }
+        else
+        {
+            setvbuf(G_LOGGER_FH, NULL, _IONBF, 0);
+            logger_fh = G_LOGGER_FH;
+        }
+    }
+    
+    /* If no log file given or open failed, log on stderr.  Need to decide if the terminal
+    ** is in raw mode or not.  If in raw mode need to output \r\n at the end
+    ** of lines instead of just \r
+    **/
+    if (G_LOGGER_FH == NULL)
+    {
+        struct termios termios;
+
+        if (tcgetattr(fileno(stderr), &termios) == 0)
+        {
+            if ((termios.c_oflag & OPOST) == 0)
+            {
+                logger_fn = (ib_msg_log_t) raw_logger;
+            }
+        }
+    }
+
+    /* If a filename was passed in above but could not be opened, log
+    ** the error so it will be formatted nicely on the erlang console
+    */
+    if (open_errno != 0)
+    {
+        logger_fn(logger_fh, "Innostore: Could not open log file \"%s\" - %s\n", 
+                  filename, strerror(open_errno));
+        logger_fn(logger_fh, "Innostore: Logging to stderr\n");
+    }
+
+    /* Finally, let InnoDb know the logging function and file handle */
+    ib_logger_set(logger_fn, logger_fh);
+
+    erl_drv_mutex_unlock(G_LOGGER_LOCK);
+}
+
+
+/* Raw tty mode logger - convert all \n to \r\n.  This is often called multiple times per log
+** line - once for the timestamp and again for the message.
+**
+** No error checking on i/o calls - if stderr is gone theres not much else to do
+*/
+static int raw_logger(ib_msg_stream_t stream, const char*fmt, ...)
+{
+    int len;
+    va_list ap;
+    int done;
+    char *ptr;
+    char *eol;
+
+    erl_drv_mutex_lock(G_LOGGER_LOCK);
+
+    // Resize the log buffer until the message fits.
+    va_start(ap, fmt);
+    do
+    {
+        done = 1;
+        len = vsnprintf(G_LOGGER_BUF, G_LOGGER_SIZE, fmt, ap);
+        if (len >= G_LOGGER_SIZE)
+        {
+            G_LOGGER_SIZE = len + 128;
+            G_LOGGER_BUF = driver_realloc(G_LOGGER_BUF, G_LOGGER_SIZE);
+            done = 0;
+        }
+    } while(!done);
+    va_end(ap);
+
+    // Scan through the log message and break on \n
+    ptr = G_LOGGER_BUF;
+    while (ptr != NULL && *ptr != '\0')
+    {
+        eol = strchr(ptr+1, '\n');
+        if (eol == NULL)
+        {
+            fputs(ptr, stream);
+            ptr = NULL;
+        }
+        else
+        {
+            size_t len = eol - ptr; // length of chars up to next LF
+            if (len > 0)
+            {
+                fwrite(ptr, len, 1, stream);
+            }
+            fputc('\r', stream);
+            ptr = eol; // ptr starts with next \n
+        }
+    }
+
+    erl_drv_mutex_unlock(G_LOGGER_LOCK);
+
+    return len;
+}
+
 
 static void send_ok(PortState* state)
 {
