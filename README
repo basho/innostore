@@ -66,6 +66,11 @@ once. Obviously, the more of your dataset that can fit in RAM, the better Inno
 will perform. If you are running a 64-bit Erlang VM, the buffer_pool_size can
 safely be set above 2G.
 
+You can control the number of file descriptors Inno will use with open_files. 
+Inno defaults to 300 which can cause problems on some platforms (e.g. OS X has 
+a default limit of 256 handles). Either set {open_files, 100} in the config or 
+increase the number of handles available.
+
 Make sure to set noatime on any disk involved with Inno, particularly if you are
 expecting significant load.
 
