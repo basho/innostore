@@ -23,6 +23,7 @@
 
 #include <assert.h>
 #include <errno.h>
+#include <limits.h>
 #include <string.h>
 #include <stdarg.h>
 #include <termios.h>
@@ -169,6 +170,9 @@ DRIVER_INIT(innostore_drv)
 
 static int innostore_drv_init()
 {
+    char log_filename[_POSIX_PATH_MAX];
+    size_t log_filename_size = sizeof(log_filename);
+
     G_ENGINE_STATE_LOCK = erl_drv_mutex_create("innostore_state_lock");
     G_LOGGER_LOCK = erl_drv_mutex_create("innostore_logger_lock");
 
@@ -179,7 +183,14 @@ static int innostore_drv_init()
     }
 
     // Set up the logger
-    set_log_file(NULL);
+    if (erl_drv_getenv("INNOSTORE_LOG", log_filename, &log_filename_size) == 0)
+    {
+        set_log_file(log_filename);
+    }
+    else
+    {
+        set_log_file(NULL);
+    }
 
     return 0;
 }
