@@ -78,3 +78,10 @@ When running innostore on solaris+zfs, make sure to set the recordsize=16k on
 the pool where data_home_dir lives (prior to starting innostore). You may also
 find that setting primarycache=metadata will positively influence performance.
 
+Logging
+-------
+
+By default log output from Inno will be delivered on stderr. The error_log config
+option allows redirecting to a file, for example to redirect to /var/log/innostore.log
+
+  {innostore, [{error_log, "/var/log/innostore.log"}]}.

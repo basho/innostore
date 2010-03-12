@@ -350,6 +350,7 @@ config_types() ->
      {data_file_path, string},
      {data_home_dir, string},
      {doublewrite, bool},
+     {error_log, string},
      {file_format, string},
      {file_io_threads, integer},
      {file_per_table, bool},
@@ -402,19 +403,70 @@ config_encode(string, _Key, Value) ->
 %% ===================================================================
 -ifdef(TEST).
 
+
+innostore_test_() ->
+    [
+     %% These tests all run under the same process and only load the
+     %% driver once/run which means it only runs ib_startup once
+     {spawn, [
+              {"startup", ?_test(begin
+                                     {ok, Port} = connect(),
+                                     true = is_started(Port),
+                                     {ok, Port2} = connect(),
+                                     true = is_started(Port2)
+                                 end)},
+
+              {"roundtrip", ?_test(ok = roundtrip_test_op(?COMPRESSION_NONE))},
+
+              {"list_tables", ?_test(begin
+                                         {ok, Port} = connect_reset(),
+                                         {ok, _} = open_keystore(foobar, Port),
+                                         {ok, _} = open_keystore(barbaz, Port),
+                                         {ok, _} = open_keystore(bazbaz, Port),
+                                         ["barbaz", "bazbaz", "foobar"] = 
+                                             lists:sort(list_keystores(Port))
+                                     end)},
+
+              {"table_is_empty", ?_test(begin
+                                            {ok, Port} = connect_reset(),
+                                            {ok, Store} = open_keystore(foobar, Port),
+                                            ok = ?MODULE:put(<<"abc">>, <<"def">>, Store),
+                                            false = is_keystore_empty(foobar, Port),
+                                            ok = ?MODULE:delete(<<"abc">>, Store),
+                                            true = is_keystore_empty(foobar, Port),
+                                            true = is_keystore_empty(nosuchtable, Port)
+                                        end)},
+
+              {"bigkey", ?_test(begin                                    
+                                    {ok, Port} = connect_reset(),
+                                    {ok, Store} = open_keystore(foobar, Port),
+                                    Key = list_to_binary(lists:duplicate(256, "x")),
+                                    {error, key_exceeds_255_bytes} = ?MODULE:put(Key, <<"abc">>, Store),
+                                    
+                                    Key2 = list_to_binary(lists:duplicate(153, "x")),
+                                    ok = ?MODULE:put(Key2, <<"abc">>, Store)
+                                end)}
+             ]},
+
+     %% Run error_log testing in a new process - needs to set up the log file
+     %% as the driver is loaded
+     {spawn,  {"error_log", {timeout, 60, ?_test(
+                                             begin
+                                                 LogFile = "innodb_eunit.log",
+                                                 file:delete(LogFile),
+                                                 false = filelib:is_regular(LogFile),
+                                                 application:set_env(innostore, error_log, LogFile),
+                                                 {ok, Port} = connect(),
+                                                 true = is_started(Port),
+                                                 true = filelib:is_regular(LogFile),
+                                                 application:unset_env(innostore, error_log)
+                                             end)}}}
+    ].
+
 connect_reset() ->
     {ok, Port} = connect(),
     [ok = drop_keystore(T, Port) || T <- list_keystores(Port)],
     {ok, Port}.
-
-startup_test() ->
-    {ok, Port} = connect(),
-    true = is_started(Port),
-    {ok, Port2} = connect(),
-    true = is_started(Port2).
-
-roundtrip_test() ->
-    ok = roundtrip_test_op(?COMPRESSION_NONE).
 
 roundtrip_test_op(Compression) ->
     {ok, Port} = connect_reset(),
@@ -426,29 +478,5 @@ roundtrip_test_op(Compression) ->
     {ok, not_found} = ?MODULE:get(<<"key1">>, S2),
     ok.
 
-list_tables_test() ->
-    {ok, Port} = connect_reset(),
-    {ok, _} = open_keystore(foobar, Port),
-    {ok, _} = open_keystore(barbaz, Port),
-    {ok, _} = open_keystore(bazbaz, Port),
-    ["barbaz", "bazbaz", "foobar"] = lists:sort(list_keystores(Port)).
-
-table_is_empty_test() ->
-    {ok, Port} = connect_reset(),
-    {ok, Store} = open_keystore(foobar, Port),
-    ok = ?MODULE:put(<<"abc">>, <<"def">>, Store),
-    false = is_keystore_empty(foobar, Port),
-    ok = ?MODULE:delete(<<"abc">>, Store),
-    true = is_keystore_empty(foobar, Port),
-    true = is_keystore_empty(nosuchtable, Port).
-
-bigkey_test() ->
-    {ok, Port} = connect_reset(),
-    {ok, Store} = open_keystore(foobar, Port),
-    Key = list_to_binary(lists:duplicate(256, "x")),
-    {error, key_exceeds_255_bytes} = ?MODULE:put(Key, <<"abc">>, Store),
-
-    Key2 = list_to_binary(lists:duplicate(153, "x")),
-    ok = ?MODULE:put(Key2, <<"abc">>, Store).
-
+    
 -endif.

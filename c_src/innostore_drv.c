@@ -115,7 +115,7 @@ static int decompress(PortState* state, char* in_value, unsigned int in_value_sz
 /**
  * Logging
  */
-static void set_log_file(const char* filename);
+static int set_log_file(const char* filename);
 static int raw_logger(ib_msg_stream_t stream, const char* fmt, ...);
 
 
@@ -431,39 +431,53 @@ static void do_set_cfg(void* arg)
     PortState* state = (PortState*)arg;
 
     char* key   = UNPACK_STRING(state->work_buffer, 0);
-    char* value = UNPACK_STRING(state->work_buffer, strlen(key)+1);
+    const char* value = UNPACK_STRING(state->work_buffer, strlen(key)+1);
 
-    // Check the expected type of the provided key so as to 1. validate it's a good key
-    // and 2. know what setter to use.
-    ib_cfg_type_t key_type;
-    ib_err_t error = ib_cfg_var_get_type(key, &key_type);
-    if (error == DB_SUCCESS)
+    if (strcmp(key, "error_log") == 0)
     {
-        if (key_type == IB_CFG_TEXT)
+        if (set_log_file(value) == 0)
         {
-            // HACK: Semantics of setting a text configuration value for innodb changed
-            // to be pointer assignment (from copy) for vsn 1.0.6.6750. So, we strdup the
-            // value to ensure everything works as expected.
-            // TODO: Setup some sort of list of strdup'd values to ensure they all get
-            // cleaned up properly. In typical usage, this isn't going to be a problem
-            // as you only initialize once per run, but it bothers me just the same.
-            error = ib_cfg_set(key, strdup(value));
+            send_ok(state);
         }
         else
         {
-            ErlDrvUInt value_i;
-            UNPACK_INT(state->work_buffer, strlen(key)+1, &value_i);
-            error = ib_cfg_set(key, value_i);
+            send_error_atom(state, "einval");
         }
-
+        return;
+    }
+    else
+    {
+        // Check the expected type of the provided key so as to 1. validate it's a good key
+        // and 2. know what setter to use.
+        ib_cfg_type_t key_type;
+        ib_err_t error = ib_cfg_var_get_type(key, &key_type);
         if (error == DB_SUCCESS)
         {
-            send_ok(state);
-            return;
-        }
-    }
+            if (key_type == IB_CFG_TEXT)
+            {
+                // HACK: Semantics of setting a text configuration value for innodb changed
+                // to be pointer assignment (from copy) for vsn 1.0.6.6750. So, we strdup the
+                // value to ensure everything works as expected.
+                // TODO: Setup some sort of list of strdup'd values to ensure they all get
+                // cleaned up properly. In typical usage, this isn't going to be a problem
+                // as you only initialize once per run, but it bothers me just the same.
+                error = ib_cfg_set(key, strdup(value));
+            }
+            else
+            {
+                ErlDrvUInt value_i;
+                UNPACK_INT(state->work_buffer, strlen(key)+1, &value_i);
+                error = ib_cfg_set(key, value_i);
+            }
 
-    send_error_str(state, ib_strerror(error));
+            if (error == DB_SUCCESS)
+            {
+                send_ok(state);
+                return;
+            }
+        }
+        send_error_str(state, ib_strerror(error));
+    }
 }
 
 static void do_start(void* arg)
@@ -1085,8 +1099,9 @@ static int decompress(PortState* state, char* in_value, unsigned int in_value_sz
     }
 }
 
-static void set_log_file(const char* filename)
+static int set_log_file(const char* filename)
 {
+    int ret = 0;
     int open_errno = 0;
     ib_msg_log_t logger_fn = fprintf;
     ib_msg_stream_t logger_fh = stderr;
@@ -1108,6 +1123,7 @@ static void set_log_file(const char* filename)
         if (G_LOGGER_FH == NULL)
         {
             open_errno = errno;
+            ret = -1;
         }
         else
         {
@@ -1147,6 +1163,8 @@ static void set_log_file(const char* filename)
     ib_logger_set(logger_fn, logger_fh);
 
     erl_drv_mutex_unlock(G_LOGGER_LOCK);
+
+    return ret;
 }
 
 
@@ -1182,9 +1200,10 @@ static int raw_logger(ib_msg_stream_t stream, const char*fmt, ...)
 
     // Scan through the log message and break on \n
     ptr = G_LOGGER_BUF;
+    eol = ptr - 1; // catch messages starting with\n 
     while (ptr != NULL && *ptr != '\0')
     {
-        eol = strchr(ptr+1, '\n');
+        eol = strchr(eol+1, '\n');
         if (eol == NULL)
         {
             fputs(ptr, stream);
