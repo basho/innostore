@@ -1,0 +1,338 @@
+#! /usr/bin/env escript
+%% -*- erlang -*-
+%%
+%% Innostore crash recovery - data dumper
+%%
+%% Iterates over all the keystores, dumping each one to a disklog names <keystore>.log
+%% in the output directory.  The disklog contains {K,V} tuples.  The data can be 
+%% reloaded using innoload.
+%%
+%% Increase verbosity with -v, shut it up with -q, default level is 1
+%%  0 - critical messages only
+%%  1 - basic progress messages - each keystore as it was dumped
+%%  2 - provides counts on each keystore as dumped
+%%  3 - dumps the key names as it goes
+%%  4 - dumps keys and values
+%% 
+-record(state, {app_config, 
+                force_recover, 
+                output = "/tmp/innorecover", 
+                ignore = [],
+                keep_going = false, 
+                verbosity = 1}).
+
+help() ->
+    io:format("innodump - crash recovery for innostore data\n"),
+    io:format("\n"),
+    io:format("innodump [-v] [-q] [-config app.config] [-force_recovery 1-6] "
+              "[-ignore keystore] [-output dir] [-keep-going]\n").
+help(N) ->
+    help(),
+    halt(N).
+
+main(Args) -> 
+    State = parse_config(#state{}, Args),
+    try
+        find_ebin(),
+        configure_innostore(State),
+        case dump_keystores(State) of
+            {ok, 0} ->
+                ok;
+            {ok, _N} ->
+                safe_exit(State, read_error);
+            {error, Reason} ->
+                msg(State, 0, "InnoDB Error: ~p\n", [Reason]),
+                safe_exit(State, Reason)
+        end
+    after
+        shutdown_inno(State)
+    end,
+    msg(State, 2, "Clean exit\n").
+    
+%%
+%% Start inno and iterate over the keystores, dumping them to disklog files.
+%%
+dump_keystores(State) ->
+    case innostore:connect() of
+        {error, Reason} ->
+            msg(State, 0, "Unable to start InnoDB"),
+            {error, Reason};
+        
+        {ok, P} -> 
+            Keystores = innostore:list_keystores(P),
+            Rc = dump_each(State, P, Keystores, 0, 0),
+            innostore:disconnect(P),
+            Rc
+    end.
+
+
+dump_each(State, _, [], Total, Errors) ->
+    msg(State, 1, "Completed: ~p k/v pairs with ~p errors.\n", [Total, Errors]),
+    {ok, Errors};
+dump_each(State, Port, [Keystore | Rest], Total, Errors) ->
+    case lists:member(Keystore, State#state.ignore) of
+        true ->
+            msg(State, 1, "Ignoring ~p\n", [Keystore]),
+            dump_each(State, Port, Rest, Total, Errors);
+
+        false ->            
+            TargetFile = filename:join(State#state.output, Keystore ++ ".log"),
+            case dump_keystore(State, Port, TargetFile, Keystore) of
+                {error, Reason} ->
+                    %% Decide what to do
+                    msg(State, 0, "Dumping ~p had errors - ~p", [Keystore, Reason]),
+                    case State#state.keep_going of
+                        true ->
+                            msg(State, 1, " -- trying to keep going\n"),
+                            dump_each(State, Port, Rest, Total, Errors + 1);
+                        
+                _ ->
+                            msg(State, 0, "\nStopping - try increasing -force_recovery "
+                                "or setting -keep-going\n"),
+                            safe_exit(State, read_errors)
+                    end;
+                {_, Count, _} ->
+                    msg(State, 2, "Dumped ~p -> ~p - ~p k/v pairs.\n", 
+                        [Keystore, TargetFile, Count]),
+                    dump_each(State, Port, Rest, Total + Count, Errors)
+            end
+    end.
+
+    
+dump_keystore(State, Port, TargetFile, Keystore) ->
+    case innostore:open_keystore(Keystore, Port) of
+        {ok, Ks} ->
+            ok = filelib:ensure_dir(TargetFile),
+            {ok, TargetLog} = disk_log:open([{name, TargetFile},
+                                             {file, TargetFile},
+                                             {repair, truncate}]),
+            try
+                msg(State, 1, "Dumping ~p -> ~p\n", [Keystore, TargetFile]),
+                dump_kvs(State, Ks, TargetLog)
+            after
+                disk_log:close(TargetLog)
+            end;
+        X ->
+            X
+    end.
+
+ 
+dump_kvs(State, Ks, TargetLog) ->
+    F = fun(K, V, {_State, Count, Log}) ->
+                ok = disk_log:alog(Log, {K, V}),
+                Count1 = Count + 1,
+                if
+                    State#state.verbosity > 3 ->
+                        io:format("~p: Key: ~p\nValue: ~p\n", [Count1, K, V]);
+                    State#state.verbosity =:= 3 ->
+                        io:format("~p: Key: ~p\n", [Count1, K]);
+                    State#state.verbosity =:= 1, Count1 rem 10000 =:= 0 ->
+                        io:format("Processed: ~p\n", [Count1]);
+                    true ->
+                        ok
+                end,
+                {State, Count1, Log}
+        end,
+    innostore:fold(F, {State, 0, TargetLog}, Ks).
+
+
+%%
+%% Work out where ebin is and add to the code path
+%%
+find_ebin() ->
+    case code:which(innostore) of
+        non_existing ->
+            case find_inno_root(escript:script_name()) of
+                {ok, InnostoreRoot} ->
+                    EbinDir = filename:join(InnostoreRoot ++ ["ebin"]),
+                    true = code:add_patha(EbinDir);
+                _ ->
+                    ok
+            end,    
+            case code:ensure_loaded(innostore) of
+                {module, innostore} ->
+                    ok;
+                X ->
+                    io:format("Could not load innostore - ~p\n", [X]),
+                    halt(1)
+            end;
+        _Exists ->
+            ok
+    end.
+    
+%% Try and find the root directory for innostore
+find_inno_root(Scriptname) ->
+    case lists:reverse(filename:split(Scriptname)) of
+        ["innodump", "priv" | Rest] ->
+            {ok, lists:reverse(Rest)};
+        S ->
+            io:format("~p\n", [S]),
+            not_found
+    end.
+            
+
+%%
+%% Load the innostore defaults, override them with the application config
+%% and set force_recovery if required
+%%
+configure_innostore(State) ->
+    application:load(innostore),
+    import_config(State#state.app_config),
+    case State#state.force_recover of
+        undefined ->
+            ok;
+        Level ->
+            msg(State, 1, "Setting force recovery to ~p\n\n", [Level]),
+            application:set_env(innostore, force_recovery, Level)
+    end,
+    msg(State, 2, "Innostore running with configuration\n~p\n", 
+        [application:get_all_env(innostore)]).
+
+%%
+%% Import the innostore section from an app.config
+%%
+import_config(undefined) ->
+    ok;
+import_config(AppState) ->
+    case file:consult(AppState) of
+        {ok, State} ->
+            find_innostore(State);
+        {error, Reason} ->
+            msg(0, "Could not ready \"~s\" - ~p", [AppState, Reason])
+    end.
+
+%% Look for {innostore, [AppSpecKeys]} somewhere in a list
+find_innostore([]) ->
+    not_found;
+find_innostore([{innostore, AppSpecKeys} | _Rest]) when is_list(AppSpecKeys) ->
+    set_config(AppSpecKeys);
+find_innostore([This | Rest]) when is_list(This) ->
+    case find_innostore(This) of
+        not_found ->
+            find_innostore(Rest);
+        X ->
+            X
+    end;
+find_innostore([_This | Rest]) -> % ignore any non-innostore atoms/tuples
+    find_innostore(Rest).
+
+%% Set the application environment
+set_config([]) ->
+    ok;
+set_config([{Par, Val} | Rest]) ->
+    application:set_env(innostore, Par, Val),
+    set_config(Rest).
+
+
+%% Make sure innostore is unloaded properly so it will call the C ib_shutdown() function.
+shutdown_inno(State) ->  
+     case erl_ddll:try_unload(innostore_drv, [{monitor, pending_driver}, kill_ports]) of
+        {ok, pending_driver, Ref} ->
+            msg(State, 2, "Unloading Innostore\n"),
+            receive
+                {'DOWN', Ref, driver, innostore_drv, unloaded} ->
+                    ok;
+                X ->
+                    msg(State, 0, "Unexpected message: ~p\n", [X])
+            end;
+         {ok, unloaded} ->
+             ok;
+         {error, not_loaded} ->
+             ok
+    end,
+    msg(State, 2, "Innostore unloaded\n").
+  
+
+%%
+%% Safe exit function - make sure innostore is unloaded before calling halt()
+%%
+safe_exit(State, Why) ->
+    shutdown_inno(State),
+
+    %% Make a nice exit code
+    Code = case Why of
+               startup_error ->
+                   1;
+               read_error ->
+                   2;
+               config ->
+                   3;
+               _ ->
+                   10
+           end,
+    halt(Code).
+               
+
+%%
+%% Output a logging message to the user if the verbosity is set high enough
+%%
+msg(State, Level, Msg) when State#state.verbosity >= Level ->
+    io:format(Msg);
+msg(_State, _Level, _Msg) ->
+    ok.
+
+msg(State, Level, Msg, Data) when State#state.verbosity >= Level ->
+    io:format(Msg, Data);
+msg(_State, _Level, _Msg, _Data) ->
+    ok.
+
+%%
+%% Argument parsing
+%%
+parse_config(State, []) ->
+    State;
+parse_config(_State, ["-help" | _Rest]) ->
+    help(0);
+parse_config(State, ["-config" | Rest]) ->
+    parse_config(State#state{app_config = expect_str(Rest) }, tl(Rest));
+parse_config(State, ["-force_recovery" | Rest]) ->
+    parse_config(State#state{force_recover = expect_level(Rest)}, tl(Rest));
+parse_config(State, ["-output" | Rest]) ->
+    parse_config(State#state{output = expect_dir(Rest)}, tl(Rest));
+parse_config(State, ["-ignore" | Rest]) ->
+    parse_config(State#state{ignore = [expect_dir(Rest) | State#state.ignore]}, tl(Rest));
+parse_config(State, ["-keep-going" | Rest]) ->
+    parse_config(State#state{keep_going = true}, Rest);
+parse_config(State, ["-v" | Rest]) ->
+    parse_config(State#state{verbosity = State#state.verbosity + 1}, Rest);
+parse_config(State, ["-q" | Rest]) ->
+    parse_config(State#state{verbosity = 0}, Rest);
+parse_config(State, [[$-, $- | Arg] | Rest]) -> % Also handle options as --option
+    parse_config(State, [[$-| Arg] | Rest]);
+parse_config(_State, ["-help" | _Rest]) ->
+    help(0);
+parse_config(_State, [Other | _Rest]) ->
+    io:format("Unexpected option \"~s\"\n", [Other]),
+    help(1).
+
+%% Expect a string, help and exit otherwise
+expect_str([]) ->
+    io:format("Expecting string\n"),
+    help(2);
+expect_str([Str|_]) ->
+    Str.
+
+%% Expect a recovery level between 1 and 6, help and exit otherwise
+expect_level([]) ->
+    io:format("Expecting recovery level\n"),
+    help(2);
+expect_level([LevelStr|_]) ->
+    Level = list_to_integer(LevelStr),
+    case Level < 1 orelse Level > 6 of
+        true ->
+            io:format("Recovery level must be between 1 and 6\n"),
+            help(2);
+        false ->
+            Level
+    end.
+     
+%% Expect a recovery level between 1 and 6, help and exit otherwise
+expect_dir([Dir|_]) ->   
+    case filelib:ensure_dir([Dir, "foo"]) of
+        {error, Reason} ->
+            io:format("Problems checking/creating directory ~s - ~p\n", [Dir, Reason]),
+            help(2);
+        ok ->
+            Dir
+    end.
+
