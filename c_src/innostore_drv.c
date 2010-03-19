@@ -235,10 +235,10 @@ static void innostore_drv_finish()
         G_LOGGER_BUF = NULL;
         G_LOGGER_SIZE = 0;
     }
-    if (G_LOGGER_FH != stderr)
+    if (G_LOGGER_FH != NULL)
     {
         fclose(G_LOGGER_FH);
-        G_LOGGER_FH = stderr;
+        G_LOGGER_FH = NULL;
         G_LOGGER_FN = raw_logger;
     }
 
