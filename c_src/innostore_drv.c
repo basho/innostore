@@ -179,9 +179,19 @@ static int innostore_drv_init()
 {
     char log_filename[_POSIX_PATH_MAX];
     size_t log_filename_size = sizeof(log_filename);
+    ErlDrvSysInfo sys_info;
 
     G_ENGINE_STATE_LOCK = erl_drv_mutex_create("innostore_state_lock");
     G_LOGGER_LOCK = erl_drv_mutex_create("innostore_logger_lock");
+
+    // Check if this is beam.smp - cannot run under beam 
+    // due to restrictions with driver_send_term
+    driver_system_info(&sys_info, sizeof(sys_info));
+    if (sys_info.smp_support == 0)
+    {
+        log("Innostore only supports the SMP runtime, add -smp enable");
+        return -1;
+    }
 
     // Initialize Inno's memory subsystem
     if (ib_init() != DB_SUCCESS)
