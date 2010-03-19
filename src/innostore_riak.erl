@@ -156,39 +156,47 @@ bucket_from_tablename(TableName) ->
 -define(TEST_BUCKET, <<"test">>).
 -define(OTHER_TEST_BUCKET, <<"othertest">>).
 
+innostore_riak_test_() ->
+    {spawn, [{"bucket_list",
+               ?_test(
+                  begin
+                      reset(),
+                      {ok, S1} = start(0, undefined),
+                      {ok, S2} = start(1, undefined),
+                      
+                      ok = ?MODULE:put(S1, {?TEST_BUCKET, <<"key1">>}, <<"abcdef">>),
+                      ok = ?MODULE:put(S2, {?TEST_BUCKET, <<"key2">>}, <<"dasdf">>),
+                      ok = ?MODULE:put(S1, {?OTHER_TEST_BUCKET, <<"key1">>}, <<"123456">>),
+                      
+                      ["othertest_0", "test_0"] = lists:sort(list_buckets(S1)),
+                      ["test_1"] = list_buckets(S2),
+                      
+                      [{?TEST_BUCKET, <<"key1">>}, {?OTHER_TEST_BUCKET, <<"key1">>}] = ?MODULE:list(S1),
+                      [{?TEST_BUCKET, <<"key2">>}] = ?MODULE:list(S2)
+                  end)},
+
+              {"fold_test",
+               ?_test(
+                  begin
+                      reset(),
+                      {ok, S} = start(2, undefined),
+                      ok = ?MODULE:put(S, {?TEST_BUCKET, <<"1">>}, <<"abcdef">>),
+                      ok = ?MODULE:put(S, {?TEST_BUCKET, <<"2">>}, <<"foo">>),
+                      ok = ?MODULE:put(S, {?TEST_BUCKET, <<"3">>}, <<"bar">>),
+                      ok = ?MODULE:put(S, {?TEST_BUCKET, <<"4">>}, <<"baz">>),
+                      [{{?TEST_BUCKET, <<"4">>}, <<"baz">>},
+                       {{?TEST_BUCKET, <<"3">>}, <<"bar">>},
+                       {{?TEST_BUCKET, <<"2">>}, <<"foo">>},
+                       {{?TEST_BUCKET, <<"1">>}, <<"abcdef">>}]
+                          = ?MODULE:fold(S, fun(K,V,A)->[{K,V}|A] end, [])
+                  end)}
+             ]}.
+
 reset() ->
     {ok, Port} = innostore:connect(),
     [ok = innostore:drop_keystore(T, Port) || T <- innostore:list_keystores(Port)],
     ok.
 
-bucket_list_test() ->
-    reset(),
-    {ok, S1} = start(0, undefined),
-    {ok, S2} = start(1, undefined),
-
-    ok = ?MODULE:put(S1, {?TEST_BUCKET, <<"key1">>}, <<"abcdef">>),
-    ok = ?MODULE:put(S2, {?TEST_BUCKET, <<"key2">>}, <<"dasdf">>),
-    ok = ?MODULE:put(S1, {?OTHER_TEST_BUCKET, <<"key1">>}, <<"123456">>),
-
-    ["othertest_0", "test_0"] = lists:sort(list_buckets(S1)),
-    ["test_1"] = list_buckets(S2),
-
-    [{?TEST_BUCKET, <<"key1">>}, {?OTHER_TEST_BUCKET, <<"key1">>}] = ?MODULE:list(S1),
-    [{?TEST_BUCKET, <<"key2">>}] = ?MODULE:list(S2).
-
-
-fold_test() ->
-    reset(),
-    {ok, S} = start(2, undefined),
-    ok = ?MODULE:put(S, {?TEST_BUCKET, <<"1">>}, <<"abcdef">>),
-    ok = ?MODULE:put(S, {?TEST_BUCKET, <<"2">>}, <<"foo">>),
-    ok = ?MODULE:put(S, {?TEST_BUCKET, <<"3">>}, <<"bar">>),
-    ok = ?MODULE:put(S, {?TEST_BUCKET, <<"4">>}, <<"baz">>),
-    [{{?TEST_BUCKET, <<"4">>}, <<"baz">>},
-     {{?TEST_BUCKET, <<"3">>}, <<"bar">>},
-     {{?TEST_BUCKET, <<"2">>}, <<"foo">>},
-     {{?TEST_BUCKET, <<"1">>}, <<"abcdef">>}]
-     = ?MODULE:fold(S, fun(K,V,A)->[{K,V}|A] end, []).
 
 
 -endif.

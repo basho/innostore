@@ -455,6 +455,7 @@ innostore_test_() ->
                                                  LogFile = "innodb_eunit.log",
                                                  file:delete(LogFile),
                                                  false = filelib:is_regular(LogFile),
+                                                 false = innostore_loaded(),
                                                  application:set_env(innostore, error_log, LogFile),
                                                  {ok, Port} = connect(),
                                                  true = is_started(Port),
@@ -478,5 +479,14 @@ roundtrip_test_op(Compression) ->
     {ok, not_found} = ?MODULE:get(<<"key1">>, S2),
     ok.
 
+innostore_loaded() ->
+    {ok, D} = erl_ddll:loaded_drivers(),
+    case lists:member("innostore_drv", D) of
+        true ->
+            io:format("~p\n", [erl_ddll:driver_info(innostore_drv)]),
+            true;
+        false ->
+            false
+    end.
     
 -endif.
