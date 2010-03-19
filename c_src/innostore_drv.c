@@ -115,6 +115,12 @@ static int decompress(PortState* state, char* in_value, unsigned int in_value_sz
 /**
  * Logging
  */
+#if (defined(__STDC_VERSION__) && __STDC_VERSION__ >= 199901L) || defined(__GNUC__)
+#  define log(...) G_LOGGER_FN(G_LOGGER_FH, __VA_ARGS__)
+#else
+#  define log(X) G_LOGGER_FN(G_LOGGER_FH, X)
+#endif
+
 static int set_log_file(const char* filename);
 static int raw_logger(ib_msg_stream_t stream, const char* fmt, ...);
 
@@ -135,6 +141,7 @@ static ErlDrvMutex* G_ENGINE_STATE_LOCK;
 static ErlDrvMutex* G_LOGGER_LOCK;
 static char*        G_LOGGER_BUF = NULL;
 static size_t       G_LOGGER_SIZE = 0;
+ib_msg_log_t        G_LOGGER_FN = (ib_msg_log_t) raw_logger;
 static FILE*        G_LOGGER_FH = NULL;
 
 /**
@@ -206,7 +213,7 @@ static void innostore_drv_finish()
         ib_err_t result = ib_shutdown(IB_SHUTDOWN_NORMAL);
         if (result != DB_SUCCESS)
         {
-            printf("ib_shutdown failed: %s\n", ib_strerror(result));
+            log("ib_shutdown failed: %s\n", ib_strerror(result));
         }
     }
 
@@ -218,12 +225,12 @@ static void innostore_drv_finish()
         G_LOGGER_BUF = NULL;
         G_LOGGER_SIZE = 0;
     }
-    if (G_LOGGER_FH != NULL)
+    if (G_LOGGER_FH != stderr)
     {
         fclose(G_LOGGER_FH);
-        G_LOGGER_FH = NULL;
+        G_LOGGER_FH = stderr;
+        G_LOGGER_FN = raw_logger;
     }
-
 
     G_ENGINE_STATE = ENGINE_STOPPED;
 }
@@ -1103,8 +1110,6 @@ static int set_log_file(const char* filename)
 {
     int ret = 0;
     int open_errno = 0;
-    ib_msg_log_t logger_fn = fprintf;
-    ib_msg_stream_t logger_fh = stderr;
 
     erl_drv_mutex_lock(G_LOGGER_LOCK);
 
@@ -1128,7 +1133,6 @@ static int set_log_file(const char* filename)
         else
         {
             setvbuf(G_LOGGER_FH, NULL, _IONBF, 0);
-            logger_fh = G_LOGGER_FH;
         }
     }
     
@@ -1144,25 +1148,26 @@ static int set_log_file(const char* filename)
         {
             if ((termios.c_oflag & OPOST) == 0)
             {
-                logger_fn = (ib_msg_log_t) raw_logger;
+                G_LOGGER_FN = (ib_msg_log_t) raw_logger;
             }
         }
     }
+
+    /* Finally, let InnoDb know the logging function and file handle */
+    ib_logger_set(G_LOGGER_FN, G_LOGGER_FH);
+
+    erl_drv_mutex_unlock(G_LOGGER_LOCK);
 
     /* If a filename was passed in above but could not be opened, log
     ** the error so it will be formatted nicely on the erlang console
     */
     if (open_errno != 0)
     {
-        logger_fn(logger_fh, "Innostore: Could not open log file \"%s\" - %s\n", 
+        log("Innostore: Could not open log file \"%s\" - %s\n", 
                   filename, strerror(open_errno));
-        logger_fn(logger_fh, "Innostore: Logging to stderr\n");
+        log("Innostore: Logging to stderr\n");
     }
 
-    /* Finally, let InnoDb know the logging function and file handle */
-    ib_logger_set(logger_fn, logger_fh);
-
-    erl_drv_mutex_unlock(G_LOGGER_LOCK);
 
     return ret;
 }
@@ -1206,7 +1211,7 @@ static int raw_logger(ib_msg_stream_t stream, const char*fmt, ...)
         eol = strchr(eol+1, '\n');
         if (eol == NULL)
         {
-            fputs(ptr, stream);
+            fputs(ptr, stderr);
             ptr = NULL;
         }
         else
@@ -1214,9 +1219,9 @@ static int raw_logger(ib_msg_stream_t stream, const char*fmt, ...)
             size_t len = eol - ptr; // length of chars up to next LF
             if (len > 0)
             {
-                fwrite(ptr, len, 1, stream);
+                fwrite(ptr, len, 1, stderr);
             }
-            fputc('\r', stream);
+            fputc('\r', stderr);
             ptr = eol; // ptr starts with next \n
         }
     }
