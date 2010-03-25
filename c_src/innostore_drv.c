@@ -283,6 +283,8 @@ static void innostore_drv_stop(ErlDrvData handle)
 
     // Signal the shutdown and wait until the current operation has completed
     state->shutdown_flag = 1;
+    erl_drv_cond_signal(state->worker_cv);
+
     while (state->op)
     {
         erl_drv_cond_wait(state->worker_cv, state->worker_lock);
