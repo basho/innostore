@@ -531,6 +531,16 @@ static void do_start(void* arg)
         // if we are recovering from previous errors
         ib_err_t error = ib_startup("barracuda");
 
+        if (error == DB_SUCCESS)
+        {
+            // Make sure the innokeystore database exists
+            // TODO: Avoid hard-coding the db name here...
+            if (ib_database_create("innokeystore") != IB_TRUE)
+            {
+                error = DB_ERROR;
+            }
+        }
+
         // Relock and sort out results
         erl_drv_mutex_lock(G_ENGINE_STATE_LOCK);
         if (error == DB_SUCCESS)
@@ -575,10 +585,6 @@ static void do_init_table(void* arg)
         // Start a txn for schema access and be sure to make it serializable
         ib_trx_t txn = ib_trx_begin(IB_TRX_SERIALIZABLE);
         ib_schema_lock_exclusive(txn);
-
-        // Make sure the innokeystore database exists
-        // TODO: Avoid hard-coding the db name here...
-        ib_database_create("innokeystore");
 
         // Create the table schema
         ib_tbl_sch_t schema;
