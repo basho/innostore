@@ -425,6 +425,11 @@ static void* innostore_worker(void* arg)
         {
             driver_free(state->work_buffer);
             state->work_buffer = 0;
+            if (state->op != 0)
+            {
+                send_error_atom(state, "stopping");
+                state->op = 0;
+            }
             erl_drv_cond_signal(state->worker_cv);
             erl_drv_mutex_unlock(state->worker_lock);
             break;
