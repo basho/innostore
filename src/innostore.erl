@@ -226,6 +226,8 @@ ensure_app_loaded() ->
 
 set_config([], _Port) ->
     ok;
+set_config([{included_applications, _} | Rest], Port) ->
+    set_config(Rest, Port);
 set_config([{Key, Value} | Rest], Port) when is_atom(Key) ->
     case lists:keysearch(Key, 1, config_types()) of
         {value, {Key, Type}} ->
