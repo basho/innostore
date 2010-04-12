@@ -248,6 +248,7 @@ static void innostore_drv_finish()
 static ErlDrvData innostore_drv_start(ErlDrvPort port, char* buffer)
 {
     PortState* state = (PortState*)driver_alloc(sizeof(PortState));
+    int worker_rc;
 
     memset(state, '\0', sizeof(PortState));
 
@@ -260,18 +261,38 @@ static ErlDrvData innostore_drv_start(ErlDrvPort port, char* buffer)
     // Initialize in the READY state
     state->port_state = STATE_READY;
 
+    // Make sure port is running in binary mode
+    set_port_control_flags(port, PORT_CONTROL_FLAG_BINARY);
+
     // Allocate a mutex and condition variable for the worker
     state->worker_lock = erl_drv_mutex_create("innostore_worker_lock");
     state->worker_cv   = erl_drv_cond_create("innostore_worker_cv");
 
-    // Make sure port is running in binary mode
-    set_port_control_flags(port, PORT_CONTROL_FLAG_BINARY);
-
     // Spin up the worker
-    erl_drv_thread_create("innostore_worker", &(state->worker),
-                          &innostore_worker, state, 0);
+    worker_rc = erl_drv_thread_create("innostore_worker", &(state->worker),
+                                      &innostore_worker, state, 0);
+    if (state->worker_lock != NULL &&
+        state->worker_cv != NULL &&
+         worker_rc == 0)
+    {
+        return (ErlDrvData)state;
+    }
+    else
+    {
+        log("Innostore: Could not create port [lock=%p, cv=%p]\n",
+            state->worker_lock, state->worker_cv);
 
-    return (ErlDrvData)state;
+        if (state->worker_cv != NULL)
+            erl_drv_cond_destroy(state->worker_cv);
+
+        if (state->worker_lock != NULL)
+            erl_drv_mutex_destroy(state->worker_lock);
+
+        driver_free(state);
+
+        errno = worker_rc;
+        return (ErlDrvData) ERL_DRV_ERROR_ERRNO;
+    }
 }
 
 static void innostore_drv_stop(ErlDrvData handle)
