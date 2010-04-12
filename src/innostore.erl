@@ -82,13 +82,7 @@ connect() ->
                 false ->
                     ensure_app_loaded(),
                     set_config(application:get_all_env(innostore), Port),
-                    erlang:port_control(Port, ?CMD_START, <<>>),
-                    receive
-                        innostore_ok ->
-                            {ok, Port};
-                        {innostore_error, Reason} ->
-                            {error, Reason}
-                    end
+                    try_and_start(Port)
             end;
 
         {error, LoadError} ->
@@ -247,6 +241,8 @@ set_config([{Key, Value} | Rest], Port) when is_atom(Key) ->
                             error_logger:error_msg("Failed to post-process value for ~p = ~p: ~p\n",
                                                    [Key, Value, Reason])
                     end;
+                {innostore_error, starting} -> % stop setting config - we are starting
+                    ok;
                 {innostore_error, Reason} ->
                     error_logger:error_msg("Failed to set value for ~p = ~p: ~p\n", [Key, Value, Reason])
             end;
@@ -267,6 +263,18 @@ on_set_config(Key, Dir) when Key == log_group_home_dir; Key == data_home_dir ->
 on_set_config(_Key, _Value) ->
     ok.
 
+
+try_and_start(Port) ->
+    erlang:port_control(Port, ?CMD_START, <<>>),
+    receive
+        innostore_ok ->
+            {ok, Port};
+        {innostore_error, starting} ->
+            timer:sleep(50),
+            try_and_start(Port);
+        {innostore_error, Reason} ->
+            {error, Reason}
+    end.
 
 list_keystores_loop(Acc) ->
     receive
