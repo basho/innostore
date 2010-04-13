@@ -8,8 +8,7 @@
   {applications, [
                   kernel,
                   stdlib,
-                  sasl,
-                  crypto
+                  sasl
                  ]},
   {registered, []},
   {env, [
