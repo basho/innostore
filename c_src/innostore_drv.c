@@ -1183,11 +1183,13 @@ static int set_log_file(const char* filename)
     erl_drv_mutex_lock(G_LOGGER_LOCK);
 
     /* Close any open log file */
-    if (G_LOGGER_FH != NULL)
+    if (G_LOGGER_FH != NULL && G_LOGGER_FH != stderr)
     {
         fclose(G_LOGGER_FH);
         G_LOGGER_FH = NULL;
     }
+
+    G_LOGGER_FN = (ib_msg_log_t) fprintf;
 
     /* If filename is non-NULL and non-empty, log to that file
     */
@@ -1213,6 +1215,7 @@ static int set_log_file(const char* filename)
     {
         struct termios termios;
 
+        G_LOGGER_FH = stderr;
         if (tcgetattr(fileno(stderr), &termios) == 0)
         {
             if ((termios.c_oflag & OPOST) == 0)
