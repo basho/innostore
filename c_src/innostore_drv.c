@@ -94,6 +94,7 @@ static void do_cursor_read(unsigned int content_flag, PortState* state);
 static void do_cursor_close(void* arg);
 
 static void do_drop_table(void* arg);
+static void do_status(void* arg);
 
 static void send_ok(PortState* state);
 static void send_ok_atom(PortState* state, const char* atom);
@@ -423,6 +424,10 @@ static int innostore_drv_control(ErlDrvData handle, unsigned int cmd,
     case CMD_DROP_TABLE:
         state->op = &do_drop_table;
         break;
+
+    case CMD_STATUS:
+        state->op = &do_status;
+        break;
     }
 
     // Signal the worker
@@ -588,7 +593,7 @@ static void do_start(void* arg)
         assert(G_ENGINE_STATE == ENGINE_STARTING);
         send_error_atom(state, "starting");        
     }
-        
+
     erl_drv_mutex_unlock(G_ENGINE_STATE_LOCK);
 }
 
@@ -1131,6 +1136,28 @@ static void do_drop_table(void* arg)
     else
     {
         ib_trx_rollback(txn);
+        send_error_str(state, ib_strerror(rc));
+    }
+}
+
+static void do_status(void* arg)
+{
+    PortState* state = (PortState*)arg;
+    char* var_name = UNPACK_STRING(state->work_buffer, 0);
+    ib_i64_t val;
+ 
+    ib_err_t rc = ib_status_get_i64(var_name, &val);
+    if (rc == DB_SUCCESS)
+    {
+        ErlDrvTermData response[] = { ERL_DRV_ATOM,   driver_mk_atom("innostore_ok"),
+                                      ERL_DRV_BUF2BINARY, (ErlDrvTermData)&val,
+                                                          (ErlDrvUInt)sizeof(val),
+                                      ERL_DRV_TUPLE, 2};
+        driver_send_term(state->port, state->port_owner,
+                         response, sizeof(response) / sizeof(response[0]));
+    }
+    else
+    {
         send_error_str(state, ib_strerror(rc));
     }
 }

@@ -33,7 +33,8 @@
          put/3,
          delete/2,
          fold_keys/3,
-         fold/3]).
+         fold/3,
+         status/1, status/2]).
 
 
 -ifdef(TEST).
@@ -52,6 +53,7 @@
 -define(CMD_CURSOR_MOVE,    1 bsl 9).
 -define(CMD_CURSOR_CLOSE,   1 bsl 10).
 -define(CMD_DROP_TABLE,     1 bsl 11).
+-define(CMD_STATUS,         1 bsl 12).
 
 -define(CURSOR_FIRST, 0).
 -define(CURSOR_NEXT,  1).
@@ -193,6 +195,20 @@ fold_keys(Fun, Acc0, Store) ->
 
 fold(Fun, Acc0, Store) ->
     fold(Fun, Acc0, ?CONTENT_KEY_VALUE, Store).
+
+ 
+status(Name, Port) when is_atom(Name) ->
+    Var = atom_to_binary(Name, latin1),
+    erlang:port_control(Port, ?CMD_STATUS, <<Var/binary, 0:8>>),
+    receive
+        {innostore_ok, <<Value:64/native>>} ->
+            Value;
+        {innostore_error, Reason} ->
+            {error, Reason}
+    end.
+
+status(Port) ->
+    [{S, status(S, Port)} || S <- status_names()].
 
 
 %% ===================================================================
@@ -387,6 +403,62 @@ config_types() ->
      {use_sys_malloc, bool},
      {version, string}].
 
+status_names() ->
+    [%% IO system related 
+     read_req_pending,
+     write_req_pending,
+     fsync_req_pending,
+     write_req_done,
+     read_req_done,
+     fsync_req_done,
+     bytes_total_written,
+     bytes_total_read,
+
+     %% Buffer pool related 
+     buffer_pool_current_size,
+     buffer_pool_data_pages,
+     buffer_pool_dirty_pages,
+     buffer_pool_misc_pages,
+     buffer_pool_free_pages,
+     buffer_pool_read_reqs,
+     buffer_pool_reads,
+     buffer_pool_waited_for_free,
+     buffer_pool_pages_flushed,
+     buffer_pool_write_reqs,
+     buffer_pool_total_pages,
+     buffer_pool_pages_read,
+     buffer_pool_pages_written,
+
+     %% Double write buffer related 
+     double_write_pages_written,
+     double_write_invoked,
+
+     %% Log related
+     log_buffer_slot_waits,
+     log_write_reqs,
+     log_write_flush_count,
+     log_bytes_written,
+     log_fsync_req_done,
+     log_write_req_pending,
+     log_fsync_req_pending,
+
+     %% Lock related 
+     lock_row_waits,
+     lock_row_waiting,
+     lock_total_wait_time_in_secs,
+     lock_wait_time_avg_in_secs,
+     lock_max_wait_time_in_secs,
+
+     %% Row operations 
+     row_total_read,
+     row_total_inserted,
+     row_total_updated,
+     row_total_deleted,
+
+     %% Miscellaneous 
+     page_size,
+     have_atomic_builtins].
+
 %%
 %% Encode configuration setting, based on type for passing through to inno api
 %%
@@ -425,6 +497,10 @@ innostore_test_() ->
                                      {ok, Port2} = connect(),
                                      true = is_started(Port2)
                                  end)},
+              {"status", ?_test(begin
+                                    {ok, Port} = connect(),
+                                    ?assertEqual(16384, status(page_size, Port))
+                                end)},
 
               {"roundtrip", ?_test(ok = roundtrip_test_op(?COMPRESSION_NONE))},
 

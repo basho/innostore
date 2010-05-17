@@ -40,6 +40,7 @@
 #define CMD_CURSOR_MOVE  (1 << 9)
 #define CMD_CURSOR_CLOSE (1 << 10)
 #define CMD_DROP_TABLE   (1 << 11)
+#define CMD_STATUS       (1 << 12)
 
 #define CMD_CURSOR_OPS   CMD_CURSOR_MOVE | CMD_CURSOR_CLOSE
 
