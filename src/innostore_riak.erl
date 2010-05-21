@@ -32,7 +32,8 @@
          list_bucket/2,
          fold/3,
          is_empty/1,
-         drop/1]).
+         drop/1,
+         status/0, status/1]).
 
 
 -ifdef(TEST).
@@ -82,6 +83,27 @@ list_bucket(State, Bucket) ->
     %% List all keys in a bucket
     Name = <<Bucket/binary, (State#state.partition_str)/binary>>,
     list_keys(false, [Name], [], State).
+
+status() ->
+    status([]).
+
+status(Names) ->
+    {ok, Port} = innostore:connect(),
+    try
+        Status = case Names of
+                     [] ->
+                         innostore:status(Port);
+                     _ ->
+                         [begin
+                              A = to_atom(N), 
+                              {A, innostore:status(to_atom(A), Port)} 
+                          end || N <- Names]
+                 end,
+        format_status(Status)
+    after
+        innostore:disconnect(Port)
+    end,
+    ok.
 
 
 %% ===================================================================
@@ -146,7 +168,17 @@ bucket_from_tablename(TableName) ->
     {match, [Name]} = re:run(TableName, "(.*)_\\d+", [{capture, all_but_first, binary}]),
     Name.
 
+to_atom(A) when is_atom(A) ->
+    A;
+to_atom(S) when is_list(S) ->
+    list_to_existing_atom(S);
+to_atom(B) when is_binary(B) ->
+    binary_to_existing_atom(B, utf8).
 
+format_status([]) -> ok;
+format_status([{K,V}|T]) ->
+    io:format("~p: ~p~n", [K,V]),
+    format_status(T).
 
 %% ===================================================================
 %% EUnit tests
@@ -189,7 +221,15 @@ innostore_riak_test_() ->
                        {{?TEST_BUCKET, <<"2">>}, <<"foo">>},
                        {{?TEST_BUCKET, <<"1">>}, <<"abcdef">>}]
                           = ?MODULE:fold(S, fun(K,V,A)->[{K,V}|A] end, [])
-                  end)}
+                  end)},
+             {"status test",
+              ?_test(
+                 begin
+                     ?assertEqual(ok, status()),
+                     ?assertEqual(ok, status([page_size])),
+                     ?assertEqual(ok, status(["page_size"])),
+                     ?assertEqual(ok, status([<<"page_size">>]))
+                 end)}
              ]}.
 
 reset() ->
