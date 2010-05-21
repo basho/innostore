@@ -77,12 +77,18 @@ delete(State, {Bucket, Key}) ->
 
 list(State) ->
     %% List all keys in all buckets
-    list_keys(true, list_buckets(State), [], State).
+    list_keys(true, list_buckets(State), [], undefined, State).
 
+list_bucket(State, '_') -> %% List bucket names
+    [bucket_from_tablename(TN) || TN <- list_buckets(State)];
+list_bucket(State, {filter, Bucket, Fun}) ->
+    %% Filter keys in a bucket
+    Name = <<Bucket/binary, (State#state.partition_str)/binary>>,
+    list_keys(false, [Name], [], Fun, State);
 list_bucket(State, Bucket) ->
     %% List all keys in a bucket
     Name = <<Bucket/binary, (State#state.partition_str)/binary>>,
-    list_keys(false, [Name], [], State).
+    list_keys(false, [Name], [], undefined, State).
 
 status() ->
     status([]).
@@ -129,20 +135,34 @@ list_buckets(State) ->
     [T || T <- innostore:list_keystores(State#state.port),
          lists:suffix(Suffix, T) == true].
 
-list_keys(_IncludeBucket, [], Acc, _State) ->
+list_keys(_IncludeBucket, [], Acc, _Pred, _State) ->
     Acc;
-list_keys(IncludeBucket, [Name | Rest], Acc, State) ->
+list_keys(IncludeBucket, [Name | Rest], Acc, Pred, State) ->
     Bucket = case IncludeBucket of
         true -> bucket_from_tablename(Name);
         false -> undefined
     end,
+    case Pred of
+        undefined ->
+            Visitor = fun(K, Acc1) -> [key_entry(Bucket, K) | Acc1] end;
+        
+        Pred when is_function(Pred)  ->
+            Visitor = fun(K, Acc1) ->
+                              Entry = key_entry(Bucket, K),
+                              case Pred(Entry) of 
+                                  true ->
+                                      [Entry | Acc1];
+                                  false ->
+                                      Acc1
+                              end
+                      end
+    end,
     {ok, Store} = innostore:open_keystore(Name, State#state.port),
-    case innostore:fold_keys(fun(K, Acc1) -> [key_entry(Bucket, K) | Acc1] end,
-                             Acc, Store) of
+    case innostore:fold_keys(Visitor, Acc, Store) of
         {error, Reason} ->
             {error, Reason};
         Acc2 ->
-            list_keys(IncludeBucket, Rest, Acc2, State)
+            list_keys(IncludeBucket, Rest, Acc2, Pred, State)
     end.
 
 fold(State, Fun0, Acc0) ->
@@ -196,15 +216,38 @@ innostore_riak_test_() ->
                       {ok, S1} = start(0, undefined),
                       {ok, S2} = start(1, undefined),
                       
-                      ok = ?MODULE:put(S1, {?TEST_BUCKET, <<"key1">>}, <<"abcdef">>),
-                      ok = ?MODULE:put(S2, {?TEST_BUCKET, <<"key2">>}, <<"dasdf">>),
-                      ok = ?MODULE:put(S1, {?OTHER_TEST_BUCKET, <<"key1">>}, <<"123456">>),
+                      ok = ?MODULE:put(S1, {?TEST_BUCKET, <<"p0key1">>}, <<"abcdef">>),
+                      ok = ?MODULE:put(S1, {?TEST_BUCKET, <<"p0key2">>}, <<"abcdef">>),
+                      ok = ?MODULE:put(S2, {?TEST_BUCKET, <<"p1key2">>}, <<"dasdf">>),
+                      ok = ?MODULE:put(S1, {?OTHER_TEST_BUCKET, <<"p0key3">>}, <<"123456">>),
                       
                       ["othertest_0", "test_0"] = lists:sort(list_buckets(S1)),
                       ["test_1"] = list_buckets(S2),
                       
-                      [{?TEST_BUCKET, <<"key1">>}, {?OTHER_TEST_BUCKET, <<"key1">>}] = ?MODULE:list(S1),
-                      [{?TEST_BUCKET, <<"key2">>}] = ?MODULE:list(S2)
+                      ?assertEqual([?OTHER_TEST_BUCKET, ?TEST_BUCKET], 
+                                   lists:sort(list_bucket(S1, '_'))),
+
+                      ?assertEqual([<<"p0key1">>,<<"p0key2">>],
+                                   lists:sort(list_bucket(S1, ?TEST_BUCKET))),
+
+                      ?assertEqual([<<"p0key3">>],
+                                   lists:sort(list_bucket(S1, ?OTHER_TEST_BUCKET))),
+
+                      FindKey1 = fun(<<"p0key1">>) -> true; (_) -> false end,
+                      ?assertEqual([<<"p0key1">>], 
+                                   lists:sort(list_bucket(S1, {filter, ?TEST_BUCKET, FindKey1}))),
+
+                      NotKey1 = fun(<<"p0key1">>) -> false; (_) -> true end,
+                      ?assertEqual([<<"p0key2">>], 
+                                   lists:sort(list_bucket(S1, {filter, ?TEST_BUCKET, NotKey1}))),
+                      
+
+                      ?assertEqual([{?OTHER_TEST_BUCKET, <<"p0key3">>},
+                                    {?TEST_BUCKET, <<"p0key1">>}, 
+                                    {?TEST_BUCKET, <<"p0key2">>}],
+                                   lists:sort(?MODULE:list(S1))),
+                      ?assertEqual([{?TEST_BUCKET, <<"p1key2">>}], 
+                                   ?MODULE:list(S2))
                   end)},
 
               {"fold_test",
