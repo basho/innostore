@@ -61,6 +61,11 @@
 #define CONTENT_KEY_ONLY  0
 #define CONTENT_KEY_VALUE 1
 
+#define FORMAT_REDUNDANT  1
+#define FORMAT_COMPACT    2
+#define FORMAT_DYNAMIC    3
+#define FORMAT_COMPRESSED 4
+
 /**
  * Operation function ptr
  */

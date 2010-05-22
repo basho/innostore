@@ -18,7 +18,8 @@
 
          {flush_log_at_trx_commit,  0},  % Flush pending log commits once per second
          {max_dirty_pages_pct,      75}, % Reduce frequency at which dirty pages are flushed
-         {log_buffer_size,     8388608}
+         {log_buffer_size,     8388608},
+         {format, compact}               % default innodb format
         ]}
  ]}.
 

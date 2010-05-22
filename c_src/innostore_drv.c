@@ -601,9 +601,30 @@ static void do_init_table(void* arg)
 {
     PortState* state = (PortState*)arg;
 
+    unsigned char fmt_code = UNPACK_BYTE(state->work_buffer, 0);
     // Unpack the table name (pre-formatted to be Database/TableName)
-    char* table = UNPACK_STRING(state->work_buffer, 0);
+    char* table = UNPACK_STRING(state->work_buffer, 1);
     ib_id_t table_id;
+    ib_tbl_fmt_t table_fmt;
+    
+    switch(fmt_code)
+    {
+      case FORMAT_REDUNDANT:
+        table_fmt = IB_TBL_REDUNDANT;
+        break;
+      case FORMAT_COMPACT:
+        table_fmt = IB_TBL_COMPACT;
+        break;
+      case FORMAT_DYNAMIC:
+        table_fmt = IB_TBL_DYNAMIC;
+        break;
+      case FORMAT_COMPRESSED:
+        table_fmt = IB_TBL_COMPRESSED;
+        break;
+      default:
+        send_error_atom(state, "bad_format");
+        return;
+    }
 
     // If the table doesn't exist, create it
     if (ib_table_get_id(table, &table_id) != DB_SUCCESS)
@@ -614,7 +635,7 @@ static void do_init_table(void* arg)
 
         // Create the table schema
         ib_tbl_sch_t schema;
-        ib_table_schema_create(table, &schema, IB_TBL_COMPACT, 0);
+        ib_table_schema_create(table, &schema, table_fmt, 0);
         ib_table_schema_add_col(schema, "key", IB_VARBINARY, IB_COL_NONE, 0, 255);
         ib_table_schema_add_col(schema, "value", IB_BLOB, IB_COL_NONE, 0, 0);
 
