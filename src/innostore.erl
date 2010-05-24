@@ -25,7 +25,7 @@
 %% Public API
 -export([connect/0,
          disconnect/1,
-         open_keystore/2,
+         open_keystore/2, open_keystore/3,
          is_keystore_empty/2,
          list_keystores/1,
          drop_keystore/2,
@@ -65,6 +65,11 @@
 
 -define(COMPRESSION_NONE, 0).
 
+-define(FORMAT_REDUNDANT, 1).
+-define(FORMAT_COMPACT, 2).
+-define(FORMAT_DYNAMIC, 3).
+-define(FORMAT_COMPRESSED, 4).
+
 -record(store, { port,
                  table_id,
                  compression = ?COMPRESSION_NONE }).
@@ -97,13 +102,19 @@ disconnect(Port) ->
     port_close(Port),
     ok.
 
-open_keystore(Name, Port) when is_atom(Name) ->
-    open_keystore(atom_to_binary(Name, utf8), Port);
-open_keystore(Name, Port) when is_list(Name) ->
-    open_keystore(list_to_binary(Name), Port);
-open_keystore(Name, Port) when is_binary(Name) ->
+
+open_keystore(Name, Port) ->
+    open_keystore(Name, config_format(), Port).
+
+open_keystore(Name, Format, Port) when is_atom(Name) ->
+    open_keystore(atom_to_binary(Name, utf8), Format, Port);
+open_keystore(Name, Format, Port) when is_list(Name) ->
+    open_keystore(list_to_binary(Name), Format, Port);
+open_keystore(Name, Format, Port) when is_binary(Name) ->
     TableName = <<"innokeystore/", Name/binary>>,
-    erlang:port_control(Port, ?CMD_INIT_TABLE, <<TableName/binary, 0:8>>),
+    
+    erlang:port_control(Port, ?CMD_INIT_TABLE, 
+                        <<(format_encode(Format)):8, TableName/binary, 0:8>>),
     receive
         {innostore_ok, <<_:64/unsigned-native>> = TableId} ->
             {ok, #store { port = Port,
@@ -363,6 +374,7 @@ fold_loop(Direction, Content, Fun, Acc, Store) ->
     end.
 
 
+
 %%
 %% Configuration type information. Extracted from api/api0cfg.c in inno distribution.
 %%
@@ -478,7 +490,24 @@ config_encode(string, data_home_dir, Value) ->
 config_encode(string, _Key, Value) ->
     <<(list_to_binary(Value))/binary, 0:8>>.
 
+%% Work out what format to use - fallback to compact if
+%% none configured.
+config_format() ->
+    case application:get_env(innostore, format) of
+        {ok, Format} ->
+            Format;
+        _ ->
+            compact
+    end.    
 
+format_encode(redundant) ->
+    ?FORMAT_REDUNDANT;
+format_encode(compact) ->
+    ?FORMAT_COMPACT;
+format_encode(dynamic) ->
+    ?FORMAT_DYNAMIC;
+format_encode(compressed) ->
+    ?FORMAT_COMPRESSED.
 
 %% ===================================================================
 %% EUnit tests
