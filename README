@@ -28,7 +28,7 @@ Installation
 * Finally, configure riak to use innostore in app.config by setting
   the storage_backend. Change riak/etc/app.config:
 
-  {storage_backend, innostore_riak}
+  {storage_backend, riak_kv_innostore_backend}
 
 * You may wish to also tune the innostore engine. Add a innostore
   application section to the riak/etc/app.config:
@@ -85,3 +85,28 @@ By default log output from Inno will be delivered on stderr. The error_log confi
 option allows redirecting to a file, for example to redirect to /var/log/innostore.log
 
   {innostore, [{error_log, "/var/log/innostore.log"}]}.
+
+InnoDB Table Format
+-------------------
+
+Embedded InnoDb offers several table formats:  compact, dynamic and compressed.
+
+  - compact format stores the first 768 bytes of the value with the key
+    and any extra data on extension pages.  This is a good option for small values.
+  - dynamic format stores the value outside separately from the index.
+    For larger values (>600 bytes) this will make the index pages denser and may provide
+    a performance increase.
+  - compressed format is like dynamic format, except it compresses the key and data pages.
+
+The default format is compact to match previous innostore releases. To configure, set
+the 'format' option in your innostore config.  The setting is system wide and will
+be used for all buckets.
+
+  %% Use dynamic format tables.
+  {innostore, [{format, dynamic}]}.
+
+If you wish to use compressed tables the page_size must be set to 0 (changing this is not
+recommended for any other case).
+
+  {innostore, [{format, compressed},
+               {page_size, 0}]}.
