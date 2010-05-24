@@ -18,7 +18,7 @@
 %% along with innostore.  If not, see <http://www.gnu.org/licenses/>.
 %%
 %% -------------------------------------------------------------------
--module(innostore_riak).
+-module(riak_kv_innostore_backend).
 
 -author('Dave Smith <dizzyd@basho.com>').
 

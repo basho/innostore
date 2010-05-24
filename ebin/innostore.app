@@ -3,7 +3,8 @@
   {vsn, "13"},
   {modules, [
              innostore,
-             innostore_riak
+             innostore_riak,
+             riak_kv_innostore_backend
             ]},
   {applications, [
                   kernel,
