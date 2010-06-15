@@ -10,7 +10,7 @@ install:
 	./rebar install
 
 distdir:
-	$(if $(findstring tip,$(INNOSTORE_TIP)),$(error "You can't generate a release tarball from tip"))
+	$(if $(findstring tip,$(INNOSTORE_TAG)),$(error "You can't generate a release tarball from tip"))
 	mkdir distdir
 	hg clone . distdir/innostore-clone
 	cd distdir/innostore-clone; \
