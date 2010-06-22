@@ -12,7 +12,7 @@ install:
 distdir:
 	$(if $(findstring tip,$(INNOSTORE_TAG)),$(error "You can't generate a release tarball from tip"))
 	mkdir distdir
-	hg clone . distdir/innostore-clone
+	hg clone -u $(INNOSTORE_TAG) . distdir/innostore-clone
 	cd distdir/innostore-clone; \
 	hg archive ../$(INNOSTORE_TAG)
 
