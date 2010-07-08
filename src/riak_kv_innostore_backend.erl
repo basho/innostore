@@ -33,6 +33,7 @@
          fold/3,
          is_empty/1,
          drop/1,
+         callback/3,
          status/0, status/1]).
 
 
@@ -182,6 +183,10 @@ is_empty(State) ->
 drop(State) ->
     KSes = list_buckets(State),
     [innostore:drop_keystore(K, State#state.port) || K <- KSes],
+    ok.
+
+%% Ignore callbacks we do not know about - may be in multi backend
+callback(_State, _Ref, _Msg) ->
     ok.
 
 bucket_from_tablename(TableName) ->
