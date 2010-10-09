@@ -90,6 +90,21 @@ list_bucket(State, Bucket) ->
     Name = <<Bucket/binary, (State#state.partition_str)/binary>>,
     list_keys(false, [Name], [], undefined, State).
 
+fold(State, Fun0, Acc0) ->
+    fold_buckets(list_buckets(State), State, Fun0, Acc0).
+
+is_empty(State) ->
+    lists:all(fun(I) -> I end,
+              [innostore:is_keystore_empty(B,
+                                           State#state.port) || 
+                  B <- list_buckets(State)]).
+
+drop(State) ->
+    KSes = list_buckets(State),
+    [innostore:drop_keystore(K, State#state.port) || K <- KSes],
+    ok.
+
+
 status() ->
     status([]).
 
@@ -130,6 +145,19 @@ keystore(Bucket, State) ->
             Store
     end.
 
+fold_buckets([], _State, _Fun, Acc0) ->
+    Acc0;
+fold_buckets([B | Rest], State, Fun, Acc0) ->
+    Bucket = bucket_from_tablename(B),
+    F = fun(K, V, A) ->
+                Fun({Bucket, K}, V, A)
+        end,
+    Acc = innostore:fold(F, Acc0, keystore(Bucket, State)),
+    fold_buckets(Rest, State, Fun, Acc).
+
+
+
+
 list_buckets(State) ->
     Suffix = binary_to_list(State#state.partition_str),
     [T || T <- innostore:list_keystores(State#state.port),
@@ -164,25 +192,6 @@ list_keys(IncludeBucket, [Name | Rest], Acc, Pred, State) ->
         Acc2 ->
             list_keys(IncludeBucket, Rest, Acc2, Pred, State)
     end.
-
-fold(State, Fun0, Acc0) ->
-    lists:flatten(
-      [innostore:fold(
-         fun(K,V,A) -> 
-                 Fun0({bucket_from_tablename(B),K},V,A) end,
-         Acc0, keystore(bucket_from_tablename(B), State)) || 
-          B <- list_buckets(State)]).
-
-is_empty(State) ->    
-    lists:all(fun(I) -> I end,
-              [innostore:is_keystore_empty(B,
-                                           State#state.port) || 
-                  B <- list_buckets(State)]).
-
-drop(State) ->
-    KSes = list_buckets(State),
-    [innostore:drop_keystore(K, State#state.port) || K <- KSes],
-    ok.
 
 bucket_from_tablename(TableName) ->
     {match, [Name]} = re:run(TableName, "(.*)_\\d+", [{capture, all_but_first, binary}]),
