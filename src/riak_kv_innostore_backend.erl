@@ -18,7 +18,9 @@
 %% along with innostore.  If not, see <http://www.gnu.org/licenses/>.
 %%
 %% -------------------------------------------------------------------
+-ifndef(OVERRIDE_MODULE).
 -module(riak_kv_innostore_backend).
+-endif.
 
 -author('Dave Smith <dizzyd@basho.com>').
 
@@ -91,6 +93,21 @@ list_bucket(State, Bucket) ->
     Name = <<Bucket/binary, (State#state.partition_str)/binary>>,
     list_keys(false, [Name], [], undefined, State).
 
+
+fold(State, Fun0, Acc0) ->
+    fold_buckets(list_buckets(State), State, Fun0, Acc0).
+
+is_empty(State) ->
+    lists:all(fun(I) -> I end,
+              [innostore:is_keystore_empty(B,
+                                           State#state.port) || 
+                  B <- list_buckets(State)]).
+
+drop(State) ->
+    KSes = list_buckets(State),
+    [innostore:drop_keystore(K, State#state.port) || K <- KSes],
+    ok.
+
 status() ->
     status([]).
 
@@ -110,6 +127,10 @@ status(Names) ->
     after
         innostore:disconnect(Port)
     end,
+    ok.
+
+%% Ignore callbacks we do not know about - may be in multi backend
+callback(_State, _Ref, _Msg) ->
     ok.
 
 
@@ -166,28 +187,17 @@ list_keys(IncludeBucket, [Name | Rest], Acc, Pred, State) ->
             list_keys(IncludeBucket, Rest, Acc2, Pred, State)
     end.
 
-fold(State, Fun0, Acc0) ->
-    lists:flatten(
-      [innostore:fold(
-         fun(K,V,A) -> 
-                 Fun0({bucket_from_tablename(B),K},V,A) end,
-         Acc0, keystore(bucket_from_tablename(B), State)) || 
-          B <- list_buckets(State)]).
+fold_buckets([], _State, _Fun, Acc0) ->
+    Acc0;
+fold_buckets([B | Rest], State, Fun, Acc0) ->
+    Bucket = bucket_from_tablename(B),
+    F = fun(K, V, A) ->
+                Fun({Bucket, K}, V, A)
+        end,
+    Acc = innostore:fold(F, Acc0, keystore(Bucket, State)),
+    fold_buckets(Rest, State, Fun, Acc).
 
-is_empty(State) ->    
-    lists:all(fun(I) -> I end,
-              [innostore:is_keystore_empty(B,
-                                           State#state.port) || 
-                  B <- list_buckets(State)]).
 
-drop(State) ->
-    KSes = list_buckets(State),
-    [innostore:drop_keystore(K, State#state.port) || K <- KSes],
-    ok.
-
-%% Ignore callbacks we do not know about - may be in multi backend
-callback(_State, _Ref, _Msg) ->
-    ok.
 
 bucket_from_tablename(TableName) ->
     {match, [Name]} = re:run(TableName, "(.*)_\\d+", [{capture, all_but_first, binary}]),
