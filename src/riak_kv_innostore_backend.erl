@@ -31,7 +31,7 @@
          put/3,
          delete/2,
          list/1,
-         stream_keys/3,
+         fold_bucket_keys/3,
          list_bucket/2,
          fold/3,
          is_empty/1,
@@ -94,7 +94,7 @@ list_bucket(State, Bucket) ->
     Name = <<Bucket/binary, (State#state.partition_str)/binary>>,
     list_keys(false, [Name], [], undefined, State).
 
-stream_keys(State, Bucket0, Visitor) when is_function(Visitor) ->
+fold_bucket_keys(State, Bucket0, Visitor) when is_function(Visitor) ->
     Bucket = <<Bucket0/binary, (State#state.partition_str)/binary>>,
     {ok, Store} = innostore:open_keystore(Bucket, State#state.port),
     case innostore:fold_keys(Visitor, [], Store) of
@@ -275,7 +275,7 @@ innostore_riak_test_() ->
                                    ?MODULE:list(S2))
                   end)},
 
-             {"stream_test",
+             {"fold_bucket_keys_test",
               ?_test(
                  begin
                      reset(),
@@ -287,7 +287,7 @@ innostore_riak_test_() ->
                      [{?TEST_BUCKET, <<"ghi">>},
                       {?TEST_BUCKET, <<"def">>},
                       {?TEST_BUCKET, <<"abc">>}] =
-                         ?MODULE:stream_keys(S1, ?TEST_BUCKET, F)
+                         ?MODULE:fold_bucket_keys(S1, ?TEST_BUCKET, F)
                  end)},
 
               {"fold_test",
