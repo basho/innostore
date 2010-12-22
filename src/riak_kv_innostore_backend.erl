@@ -31,6 +31,7 @@
          put/3,
          delete/2,
          list/1,
+         fold_bucket_keys/3,
          list_bucket/2,
          fold/3,
          is_empty/1,
@@ -93,14 +94,22 @@ list_bucket(State, Bucket) ->
     Name = <<Bucket/binary, (State#state.partition_str)/binary>>,
     list_keys(false, [Name], [], undefined, State).
 
+fold_bucket_keys(State, Bucket0, Visitor) when is_function(Visitor) ->
+    Bucket = <<Bucket0/binary, (State#state.partition_str)/binary>>,
+    {ok, Store} = innostore:open_keystore(Bucket, State#state.port),
+    case innostore:fold_keys(Visitor, [], Store) of
+        {error, Reason} ->
+            {error, Reason};
+        Acc ->
+            Acc
+    end.
 
 fold(State, Fun0, Acc0) ->
     fold_buckets(list_buckets(State), State, Fun0, Acc0).
 
 is_empty(State) ->
     lists:all(fun(I) -> I end,
-              [innostore:is_keystore_empty(B,
-                                           State#state.port) || 
+              [innostore:is_keystore_empty(B, State#state.port) ||
                   B <- list_buckets(State)]).
 
 drop(State) ->
@@ -120,7 +129,7 @@ status(Names) ->
                      _ ->
                          [begin
                               A = to_atom(N), 
-                              {A, innostore:status(to_atom(A), Port)} 
+                              {A, innostore:status(A, Port)}
                           end || N <- Names]
                  end,
         format_status(Status)
@@ -264,6 +273,21 @@ innostore_riak_test_() ->
                       ?assertEqual([{?TEST_BUCKET, <<"p1key2">>}], 
                                    ?MODULE:list(S2))
                   end)},
+
+             {"fold_bucket_keys_test",
+              ?_test(
+                 begin
+                     reset(),
+                     {ok, S1} = start(5, undefined),
+                     ok = ?MODULE:put(S1, {?TEST_BUCKET, <<"abc">>}, <<"123">>),
+                     ok = ?MODULE:put(S1, {?TEST_BUCKET, <<"def">>}, <<"456">>),
+                     ok = ?MODULE:put(S1, {?TEST_BUCKET, <<"ghi">>}, <<"789">>),
+                     F = fun(Key, Accum) -> [{?TEST_BUCKET, Key}|Accum] end,
+                     [{?TEST_BUCKET, <<"ghi">>},
+                      {?TEST_BUCKET, <<"def">>},
+                      {?TEST_BUCKET, <<"abc">>}] =
+                         ?MODULE:fold_bucket_keys(S1, ?TEST_BUCKET, F)
+                 end)},
 
               {"fold_test",
                ?_test(
