@@ -1,0 +1,143 @@
+* innostore
+** Overview
+Innostore is a simple Erlang API to Embedded InnoDB.
+
+Innostore does not attempt to provide the same API as Inno itself, but instead
+provides a simpler interface which is sufficient for many uses.  This interface
+is exported by the =innostore= module of the =innostore= application.
+
+An example of use of that interface can be found in the =innostore_riak= module,
+which is a valid Riak backend module using innostore for storage.
+
+** Installation
+1. Download or clone the innostore project from http://hg.basho.com/innostore.
+
+2. In the =innostore= directory, build it:
+:  $ make
+
+3. Install innostore ...
+   1. Option 1: ... into your Erlang distribution:
+   :  $ make install
+
+   2. Option 2: ... into an existing Riak build:
+
+   : ** Use rebar to install into your Riak lib directory 
+   : $ ./rebar install target=$RIAK/lib
+
+4. Finally, configure riak to use innostore in =app.config= by setting
+   the =storage_backend=. Change =riak/etc/app.config=:
+
+:  {storage_backend, riak_kv_innostore_backend}
+
+5. You may wish to also tune the innostore engine. Add an =innostore=
+   application section to the =riak/etc/app.config=:
+
+#+BEGIN_SRC erlang
+  %% Inno db config
+  {innostore, [
+               {data_home_dir,            "/mnt/innodb"},
+               {log_group_home_dir,       "/mnt/innodb"},
+               {buffer_pool_size,         2147483648} %% 2G of buffer
+              ]}
+#+END_SRC
+
+** Tuning
+
+While InnoDB can be extremely fast for a durable store, its performance is
+highly dependent on tuning the configuration to match the hardware and
+dataset. All the configuration is available as application variables in the
+=innostore= application scope. An example configuration follows:
+
+#+BEGIN_SRC erlang
+%% InnoDB config
+{innostore, [
+             {data_home_dir,            "/innodb"},     %% Where data files go
+             {log_group_home_dir,       "/innodb-log"}, %% Where log files go
+             {buffer_pool_size,         2147483648},    %% 2G in-memory buffer in bytes
+             {log_files_in_group,       6},             %% How many files you need -- usually, 3 < x < 6
+             {log_file_size,            134217728}      %% No bigger than 256MB
+            ]},
+#+END_SRC
+
+In general, only the first three parameters (=data_home_dir=, =log_group_home_dir=
+and =buffer_pool_size=) will need to be changed. It is strongly recommended that
+the data home dir and log home dir are kept on separate spindles/drives.
+
+The =buffer_pool_size= determines how much data Inno tries to keep in memory at
+once. Obviously, the more of your dataset that can fit in RAM, the better Inno
+will perform. If you are running a 64-bit Erlang VM, the =buffer_pool_size= can
+safely be set above 2G.
+
+You can control the number of file descriptors Inno will use with =open_files=. 
+Inno defaults to 300 which can cause problems on some platforms (e.g. OS X has 
+a default limit of 256 handles). Either set ={open_files, 100}= in the config or 
+increase the number of handles available.
+
+Make sure to set =noatime= on any disk involved with Inno, particularly if you are
+expecting significant load.
+
+When running innostore on solaris+zfs, make sure to set the =recordsize=16k= on
+the pool where =data_home_dir= lives (prior to starting innostore). You may also
+find that setting =primarycache=metadata= will positively influence performance.
+
+** Logging
+
+By default log output from Inno will be delivered on stderr. The =error_log= config
+option allows redirecting to a file, for example to redirect to =/var/log/innostore.log=
+
+:  {innostore, [{error_log, "/var/log/innostore.log"}]}.
+
+** InnoDB Table Format
+
+Embedded InnoDb offers several table formats:  =compact=, =dynamic= and =compressed=.
+
+  - =compact= format stores the first 768 bytes of the value with the key
+    and any extra data on extension pages.  This is a good option for small values.
+  - =dynamic= format stores the value outside separately from the index.
+    For larger values (>600 bytes) this will make the index pages denser and may provide
+    a performance increase.
+  - =compressed= format is like dynamic format, except it compresses the key and data pages.
+
+The default format is =compact= to match previous innostore releases. To configure, set
+the =format= option in your innostore config.  The setting is system wide and will
+be used for all buckets.
+
+#+BEGIN_SRC erlang
+  %% Use dynamic format tables.
+  {innostore, [{format, dynamic}]}.
+#+END_SRC
+
+If you wish to use compressed tables the =page_size= must be set to 0 (changing this is not
+recommended for any other case).
+
+#+BEGIN_SRC erlang
+  {innostore, [{format, compressed},
+               {page_size, 0}]}.
+#+END_SRC
+
+** Contributing
+   We encourage contributions to =innostore= from the community.
+
+   1) Fork the =innostore= repository on
+      [[https://github.com/basho/innostore][Github]].
+   2) Clone your fork or add the remote if you already have a clone of
+      the repository.
+#+BEGIN_SRC shell
+git clone git@github.com:yourusername/innostore.git
+# or
+git remote add mine git@github.com:yourusername/innostore.git
+#+END_SRC
+   3) Create a topic branch for your change.
+#+BEGIN_SRC shell
+git checkout -b some-topic-branch
+#+END_SRC
+   4) Make your change and commit. Use a clear and descriptive commit
+      message, spanning multiple lines if detailed explanation is
+      needed.
+   5) Push to your fork of the repository and then send a pull-request
+      through Github.
+#+BEGIN_SRC shell
+git push mine some-topic-branch
+#+END_SRC
+   6) A Basho engineer or community maintainer will review your patch
+      and merge it into the main repository or send you feedback.
