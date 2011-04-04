@@ -10,7 +10,7 @@ An example of use of that interface can be found in the =innostore_riak= module,
 which is a valid Riak backend module using innostore for storage.
 
 ** Installation
-1. Download or clone the innostore project from http://hg.basho.com/innostore.
+1. Download or clone the innostore project from http://github.com/basho/innostore.
 
 2. In the =innostore= directory, build it:
 :  $ make
