@@ -111,7 +111,7 @@ fold_buckets(FoldBucketsFun, Acc, _Opts, #state{partition_str=Partition,
                                                 port=Port}) ->
     FoldFun = fold_buckets_fun(FoldBucketsFun),
     Buckets = list_buckets(Partition, Port),
-    lists:foldl(FoldBucketsFun, Acc, Buckets).
+    lists:foldl(FoldFun, Acc, Buckets).
 
 %% @doc Fold over all the keys for one or all buckets.
 fold_keys(FoldKeysFun, Acc, Opts, #state{partition_str=Partition,
@@ -125,12 +125,7 @@ fold_keys(FoldKeysFun, Acc, Opts, #state{partition_str=Partition,
         _ ->
             FoldFun = fold_keys_fun(FoldKeysFun, Bucket),
             KeyStore = keystore(Bucket, Partition, Port),
-            case innostore:fold_keys(FoldFun, Acc, KeyStore) of
-                {error, Reason} ->
-                    {error, Reason};
-                Acc ->
-                    Acc
-            end
+            innostore:fold_keys(FoldFun, Acc, KeyStore)
     end.
 
 %% @doc Fold over all the objects for one or all buckets.
@@ -145,12 +140,7 @@ fold_objects(FoldObjectsFun, Acc, Opts, #state{partition_str=Partition,
         _ ->
             FoldFun = fold_objects_fun(FoldObjectsFun, Bucket),
             KeyStore = keystore(Bucket, Partition, Port),
-            case innostore:fold(FoldFun, Acc, KeyStore) of
-                {error, Reason} ->
-                    {error, Reason};
-                Acc ->
-                    Acc
-            end
+            innostore:fold(FoldFun, Acc, KeyStore)
     end.
 
 %% @doc Returns true if this innostore backend contains any
@@ -180,10 +170,6 @@ callback(_Ref, _Msg, _State) ->
 %% ===================================================================
 %% Internal functions
 %% ===================================================================
-
-%% @private
-key_entry(undefined, Key) -> Key;
-key_entry(Bucket, Key) -> {Bucket, Key}.
 
 %% @private
 keystore(Bucket, Partition, Port) ->
@@ -262,14 +248,6 @@ bucket_from_tablename(TableName) ->
     Name.
 
 %% @private
-to_atom(A) when is_atom(A) ->
-    A;
-to_atom(S) when is_list(S) ->
-    list_to_existing_atom(S);
-to_atom(B) when is_binary(B) ->
-    binary_to_existing_atom(B, utf8).
-
-%% @private
 format_status([]) -> ok;
 format_status([{K,V}|T]) ->
     io:format("~p: ~p~n", [K,V]),
@@ -284,84 +262,122 @@ format_status([{K,V}|T]) ->
 -define(OTHER_TEST_BUCKET, <<"othertest">>).
 
 innostore_riak_test_() ->
-    {spawn, [{"bucket_list",
+    {spawn, [{"fold_buckets_test",
                ?_test(
                   begin
                       reset(),
                       {ok, S1} = start(0, undefined),
                       {ok, S2} = start(1, undefined),
 
-                      ok = ?MODULE:put(S1, {?TEST_BUCKET, <<"p0key1">>}, <<"abcdef">>),
-                      ok = ?MODULE:put(S1, {?TEST_BUCKET, <<"p0key2">>}, <<"abcdef">>),
-                      ok = ?MODULE:put(S2, {?TEST_BUCKET, <<"p1key2">>}, <<"dasdf">>),
-                      ok = ?MODULE:put(S1, {?OTHER_TEST_BUCKET, <<"p0key3">>}, <<"123456">>),
+                      {ok, S1} = ?MODULE:put(?TEST_BUCKET, <<"p0key1">>, <<"abcdef">>, S1),
+                      {ok, S1} = ?MODULE:put(?TEST_BUCKET, <<"p0key2">>, <<"abcdef">>, S1),
+                      {ok, S2} = ?MODULE:put(?TEST_BUCKET, <<"p1key2">>, <<"dasdf">>, S2),
+                      {ok, S1} = ?MODULE:put(?OTHER_TEST_BUCKET, <<"p0key3">>, <<"123456">>, S1),
 
-                      ["othertest_0", "test_0"] = lists:sort(list_buckets(S1)),
-                      ["test_1"] = list_buckets(S2),
+                      FoldBucketsFun =
+                          fun(Bucket, Acc) ->
+                                  [Bucket | Acc]
+                          end,
+                      FoldKeysFun = 
+                          fun(_Bucket, Key, Acc) ->
+                                  [Key | Acc]
+                          end,
 
                       ?assertEqual([?OTHER_TEST_BUCKET, ?TEST_BUCKET],
-                                   lists:sort(list_bucket(S1, '_'))),
+                                   lists:sort(fold_buckets(FoldBucketsFun, [], [], S1))),
 
                       ?assertEqual([<<"p0key1">>,<<"p0key2">>],
-                                   lists:sort(list_bucket(S1, ?TEST_BUCKET))),
+                                   lists:sort(fold_keys(FoldKeysFun, [], [{bucket, ?TEST_BUCKET}], S1))),
+
+                      ?assertEqual([<<"p1key2">>],
+                                   lists:sort(fold_keys(FoldKeysFun, [], [{bucket, ?TEST_BUCKET}], S2))),
 
                       ?assertEqual([<<"p0key3">>],
-                                   lists:sort(list_bucket(S1, ?OTHER_TEST_BUCKET))),
+                                   lists:sort(fold_keys(FoldKeysFun, [], [{bucket, ?OTHER_TEST_BUCKET}], S1))),
 
-                      FindKey1 = fun(<<"p0key1">>) -> true; (_) -> false end,
+                      FindKeyFun = fun(<<"p0key1">>) -> true; (_) -> false end,
+                      FoldKeysFun1 =
+                          fun(_Bucket, Key, Acc) ->
+                                  case FindKeyFun(Key) of
+                                      true ->
+                                          [Key | Acc];
+                                      false ->
+                                          Acc
+                                  end
+                          end,
+
                       ?assertEqual([<<"p0key1">>],
-                                   lists:sort(list_bucket(S1, {filter, ?TEST_BUCKET, FindKey1}))),
+                                   lists:sort(fold_keys(FoldKeysFun1, [], [{bucket, ?TEST_BUCKET}], S1))),
 
-                      NotKey1 = fun(<<"p0key1">>) -> false; (_) -> true end,
+                      NotKeyFun = fun(<<"p0key1">>) -> false; (_) -> true end,
+                      FoldKeysFun2 =
+                          fun(_Bucket, Key, Acc) ->
+                                  case NotKeyFun(Key) of
+                                      true ->
+                                          [Key | Acc];
+                                      false ->
+                                          Acc
+                                  end
+                          end,
+
                       ?assertEqual([<<"p0key2">>],
-                                   lists:sort(list_bucket(S1, {filter, ?TEST_BUCKET, NotKey1}))),
+                                   lists:sort(fold_keys(FoldKeysFun2, [], [{bucket, ?TEST_BUCKET}], S1))),
 
-
+                      FoldKeysFun3 = 
+                          fun(Bucket, Key, Acc) ->
+                                  [{Bucket, Key} | Acc]
+                          end,
                       ?assertEqual([{?OTHER_TEST_BUCKET, <<"p0key3">>},
                                     {?TEST_BUCKET, <<"p0key1">>},
                                     {?TEST_BUCKET, <<"p0key2">>}],
-                                   lists:sort(?MODULE:list(S1))),
+                                   lists:sort(fold_keys(FoldKeysFun3, [], [], S1))),
                       ?assertEqual([{?TEST_BUCKET, <<"p1key2">>}],
-                                   ?MODULE:list(S2))
+                                   lists:sort(fold_keys(FoldKeysFun3, [], [], S2)))
                   end)},
 
-             {"fold_bucket_keys_test",
+             {"fold_keys_test",
               ?_test(
                  begin
                      reset(),
                      {ok, S1} = start(5, undefined),
-                     ok = ?MODULE:put(S1, {?TEST_BUCKET, <<"abc">>}, <<"123">>),
-                     ok = ?MODULE:put(S1, {?TEST_BUCKET, <<"def">>}, <<"456">>),
-                     ok = ?MODULE:put(S1, {?TEST_BUCKET, <<"ghi">>}, <<"789">>),
-                     F = fun(Key, Accum) -> [{?TEST_BUCKET, Key}|Accum] end,
+                     {ok, S1} = ?MODULE:put(?TEST_BUCKET, <<"abc">>, <<"123">>, S1),
+                     {ok, S1} = ?MODULE:put(?TEST_BUCKET, <<"def">>, <<"456">>, S1),
+                     {ok, S1} = ?MODULE:put(?TEST_BUCKET, <<"ghi">>, <<"789">>, S1),
+                     FoldKeysFun = 
+                         fun(Bucket, Key, Acc) ->
+                                 [{Bucket, Key} | Acc]
+                         end,
                      [{?TEST_BUCKET, <<"ghi">>},
                       {?TEST_BUCKET, <<"def">>},
                       {?TEST_BUCKET, <<"abc">>}] =
-                         ?MODULE:fold_bucket_keys(S1, ?TEST_BUCKET, F)
+                         ?MODULE:fold_keys(FoldKeysFun, [], [{bucket, ?TEST_BUCKET}], S1)
                  end)},
 
-              {"fold_test",
+              {"fold_objects_test",
                ?_test(
                   begin
                       reset(),
                       {ok, S} = start(2, undefined),
-                      ok = ?MODULE:put(S, {?TEST_BUCKET, <<"1">>}, <<"abcdef">>),
-                      ok = ?MODULE:put(S, {?TEST_BUCKET, <<"2">>}, <<"foo">>),
-                      ok = ?MODULE:put(S, {?TEST_BUCKET, <<"3">>}, <<"bar">>),
-                      ok = ?MODULE:put(S, {?TEST_BUCKET, <<"4">>}, <<"baz">>),
+                      {ok, S} = ?MODULE:put(?TEST_BUCKET, <<"1">>, <<"abcdef">>, S),
+                      {ok, S} = ?MODULE:put(?TEST_BUCKET, <<"2">>, <<"foo">>, S),
+                      {ok, S} = ?MODULE:put(?TEST_BUCKET, <<"3">>, <<"bar">>, S),
+                      {ok, S} = ?MODULE:put(?TEST_BUCKET, <<"4">>, <<"baz">>, S),
+                      FoldObjectsFun = 
+                          fun(Bucket, Key, Value, Acc) ->
+                                  [{{Bucket, Key}, Value} | Acc]
+                          end,
                       [{{?TEST_BUCKET, <<"4">>}, <<"baz">>},
                        {{?TEST_BUCKET, <<"3">>}, <<"bar">>},
                        {{?TEST_BUCKET, <<"2">>}, <<"foo">>},
                        {{?TEST_BUCKET, <<"1">>}, <<"abcdef">>}]
-                          = ?MODULE:fold(S, fun(K,V,A)->[{K,V}|A] end, [])
+                          = ?MODULE:fold_objects(FoldObjectsFun, [], [{bucket, ?TEST_BUCKET}], S)
                   end)},
              {"status test",
               ?_test(
                  begin
-                     ?assertEqual(ok, status()),
-                     ?assertEqual(ok, status([page_size])),
-                     ?assertEqual(ok, status(["page_size"])),
-                     ?assertEqual(ok, status([<<"page_size">>]))
+                     reset(),
+                     {ok, S} = start(2, undefined),
+                     ?assertEqual(ok, status(S))
                  end)}
              ]}.
 
