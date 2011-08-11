@@ -95,7 +95,7 @@ get(Bucket, Key, #state{partition_str=Partition,
                         port=Port}=State) ->
     case innostore:get(Key, keystore(Bucket, Partition, Port)) of
         {ok, not_found} ->
-            {error, notfound, State};
+            {error, not_found, State};
         {ok, Value} ->
             {ok, Value, State};
         {error, Reason} ->
