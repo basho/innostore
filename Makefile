@@ -7,7 +7,7 @@ all: deps compile test
 compile:
 	./rebar compile
 
-clean: distclean
+clean:
 	./rebar clean
 
 test:
