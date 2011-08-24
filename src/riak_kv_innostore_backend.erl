@@ -30,6 +30,7 @@
          stop/1,
          get/3,
          put/4,
+         put/5,
          delete/3,
          drop/1,
          fold_buckets/4,
@@ -104,6 +105,24 @@ get(Bucket, Key, #state{partition_str=Partition,
 
 %% @doc Insert an object into the innostore backend
 -spec put(bucket(), key(), binary(), state()) ->
+                 {ok, state()} |
+                 {error, term(), state()}.
+put(Bucket, Key, _IndexSpecs, Value, #state{partition_str=Partition,
+                                            port=Port}=State) ->
+    KeyStore = keystore(Bucket, Partition, Port),
+    case innostore:put(Key, Value, KeyStore) of
+        ok ->
+            {ok, State};
+        {error, Reason} ->
+            {error, Reason, State}
+    end.
+
+%% @doc Insert an object into the innostore backend.
+%% NOTE: The innostore backend does not currently support
+%% secondary indexing. This function is only here
+%% to conform to the backend API specification.
+-type index_spec() :: {add, Index, SecondaryKey} | {remove, Index, SecondaryKey}.
+-spec put(riak_object:bucket(), riak_object:key(), [index_spec()], binary(), state()) ->
                  {ok, state()} |
                  {error, term(), state()}.
 put(Bucket, Key, Value, #state{partition_str=Partition,
