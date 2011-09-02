@@ -29,7 +29,6 @@
          start/2,
          stop/1,
          get/3,
-         put/4,
          put/5,
          delete/3,
          drop/1,
@@ -103,29 +102,15 @@ get(Bucket, Key, #state{partition_str=Partition,
             {error, Reason, State}
     end.
 
-%% @doc Insert an object into the innostore backend
--spec put(bucket(), key(), binary(), state()) ->
-                 {ok, state()} |
-                 {error, term(), state()}.
-put(Bucket, Key, _IndexSpecs, Value, #state{partition_str=Partition,
-                                            port=Port}=State) ->
-    KeyStore = keystore(Bucket, Partition, Port),
-    case innostore:put(Key, Value, KeyStore) of
-        ok ->
-            {ok, State};
-        {error, Reason} ->
-            {error, Reason, State}
-    end.
-
 %% @doc Insert an object into the innostore backend.
 %% NOTE: The innostore backend does not currently support
-%% secondary indexing. This function is only here
-%% to conform to the backend API specification.
+%% secondary indexing and the _IndexSpecs parameter
+%% is ignored.
 -type index_spec() :: {add, Index, SecondaryKey} | {remove, Index, SecondaryKey}.
 -spec put(riak_object:bucket(), riak_object:key(), [index_spec()], binary(), state()) ->
                  {ok, state()} |
                  {error, term(), state()}.
-put(Bucket, Key, Value, #state{partition_str=Partition,
+put(Bucket, Key, _IndexSpecs, Value, #state{partition_str=Partition,
                                port=Port}=State) ->
     KeyStore = keystore(Bucket, Partition, Port),
     case innostore:put(Key, Value, KeyStore) of
@@ -327,10 +312,10 @@ innostore_riak_test_() ->
                      {ok, S1} = start(0, undefined),
                      {ok, S2} = start(1, undefined),
 
-                     {ok, S1} = ?MODULE:put(?TEST_BUCKET, <<"p0key1">>, <<"abcdef">>, S1),
-                     {ok, S1} = ?MODULE:put(?TEST_BUCKET, <<"p0key2">>, <<"abcdef">>, S1),
-                     {ok, S2} = ?MODULE:put(?TEST_BUCKET, <<"p1key2">>, <<"dasdf">>, S2),
-                     {ok, S1} = ?MODULE:put(?OTHER_TEST_BUCKET, <<"p0key3">>, <<"123456">>, S1),
+                     {ok, S1} = ?MODULE:put(?TEST_BUCKET, <<"p0key1">>, [], <<"abcdef">>, S1),
+                     {ok, S1} = ?MODULE:put(?TEST_BUCKET, <<"p0key2">>, [], <<"abcdef">>, S1),
+                     {ok, S2} = ?MODULE:put(?TEST_BUCKET, <<"p1key2">>, [], <<"dasdf">>, S2),
+                     {ok, S1} = ?MODULE:put(?OTHER_TEST_BUCKET, <<"p0key3">>, [], <<"123456">>, S1),
 
                      FoldBucketsFun =
                          fun(Bucket, Acc) ->
@@ -398,9 +383,9 @@ innostore_riak_test_() ->
                  begin
                      reset(),
                      {ok, S1} = start(5, undefined),
-                     {ok, S1} = ?MODULE:put(?TEST_BUCKET, <<"abc">>, <<"123">>, S1),
-                     {ok, S1} = ?MODULE:put(?TEST_BUCKET, <<"def">>, <<"456">>, S1),
-                     {ok, S1} = ?MODULE:put(?TEST_BUCKET, <<"ghi">>, <<"789">>, S1),
+                     {ok, S1} = ?MODULE:put(?TEST_BUCKET, <<"abc">>, [], <<"123">>, S1),
+                     {ok, S1} = ?MODULE:put(?TEST_BUCKET, <<"def">>, [], <<"456">>, S1),
+                     {ok, S1} = ?MODULE:put(?TEST_BUCKET, <<"ghi">>, [], <<"789">>, S1),
                      FoldKeysFun =
                          fun(Bucket, Key, Acc) ->
                                  [{Bucket, Key} | Acc]
@@ -416,10 +401,10 @@ innostore_riak_test_() ->
                  begin
                      reset(),
                      {ok, S} = start(2, undefined),
-                     {ok, S} = ?MODULE:put(?TEST_BUCKET, <<"1">>, <<"abcdef">>, S),
-                     {ok, S} = ?MODULE:put(?TEST_BUCKET, <<"2">>, <<"foo">>, S),
-                     {ok, S} = ?MODULE:put(?TEST_BUCKET, <<"3">>, <<"bar">>, S),
-                     {ok, S} = ?MODULE:put(?TEST_BUCKET, <<"4">>, <<"baz">>, S),
+                     {ok, S} = ?MODULE:put(?TEST_BUCKET, <<"1">>, [], <<"abcdef">>, S),
+                     {ok, S} = ?MODULE:put(?TEST_BUCKET, <<"2">>, [], <<"foo">>, S),
+                     {ok, S} = ?MODULE:put(?TEST_BUCKET, <<"3">>, [], <<"bar">>, S),
+                     {ok, S} = ?MODULE:put(?TEST_BUCKET, <<"4">>, [], <<"baz">>, S),
                      FoldObjectsFun =
                          fun(Bucket, Key, Value, Acc) ->
                                  [{{Bucket, Key}, Value} | Acc]
