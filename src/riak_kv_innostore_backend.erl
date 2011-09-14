@@ -30,7 +30,7 @@
          stop/1,
          get/3,
          put/5,
-         delete/3,
+         delete/4,
          drop/1,
          fold_buckets/4,
          fold_keys/4,
@@ -44,7 +44,7 @@
 -endif.
 
 -define(API_VERSION, 1).
--define(CAPABILITIES, []).
+-define(CAPABILITIES, [async_fold]).
 
 -record(state, { partition_str,
                  port }).
@@ -121,11 +121,14 @@ put(Bucket, Key, _IndexSpecs, Value, #state{partition_str=Partition,
     end.
 
 %% @doc Delete an object from the innostore backend
--spec delete(bucket(), key(), state()) ->
+%% NOTE: The innostore backend does not currently support
+%% secondary indexing and the _IndexSpecs parameter
+%% is ignored.
+-spec delete(bucket(), key(), [index_spec()], state()) ->
                     {ok, state()} |
                     {error, term(), state()}.
-delete(Bucket, Key, #state{partition_str=Partition,
-                           port=Port}=State) ->
+delete(Bucket, Key, _IndexSpecs, #state{partition_str=Partition,
+                                        port=Port}=State) ->
     KeyStore = keystore(Bucket, Partition, Port),
     case innostore:delete(Key, KeyStore) of
         ok ->
@@ -138,12 +141,41 @@ delete(Bucket, Key, #state{partition_str=Partition,
 -spec fold_buckets(fold_buckets_fun(),
                    any(),
                    [],
-                   state()) -> {ok, any()} | {error, term()}.
-fold_buckets(FoldBucketsFun, Acc, _Opts, #state{partition_str=Partition,
-                                                port=Port}) ->
+                   state()) -> {ok, any()} | {async, fun()} | {error, term()}.
+fold_buckets(FoldBucketsFun, Acc, Opts, #state{partition_str=Partition,
+                                               port=Port}) ->
     FoldFun = fold_buckets_fun(FoldBucketsFun),
-    Buckets = list_buckets(Partition, Port),
-    lists:foldl(FoldFun, Acc, Buckets).
+    Suffix = binary_to_list(Partition),
+    FilterFun =
+        fun(KeyStore, Acc1) ->
+                case lists:suffix(Suffix, KeyStore) of
+                    true ->
+                        Bucket = bucket_from_tablename(KeyStore),
+                        FoldFun(Bucket, Acc1);
+                    false ->
+                        Acc
+                end
+        end,
+    case lists:member(async_fold, Opts) of
+        true ->
+    BucketFolder =
+                fun() ->
+                        case innostore:connect() of
+                            {ok, Port1} ->
+                                lists:foldl(FilterFun,
+                                            Acc,
+                                            innostore:list_keystores(Port1));
+                            {error, Reason} ->
+                                {error, Reason}
+                        end
+                end,
+            {async, BucketFolder};
+        false ->
+            FoldResults = lists:foldl(FilterFun,
+                                      Acc,
+                                      innostore:list_keystores(Port)),
+            {ok, FoldResults}
+    end.
 
 %% @doc Fold over all the keys for one or all buckets.
 -spec fold_keys(fold_keys_fun(),
@@ -153,15 +185,13 @@ fold_buckets(FoldBucketsFun, Acc, _Opts, #state{partition_str=Partition,
 fold_keys(FoldKeysFun, Acc, Opts, #state{partition_str=Partition,
                                          port=Port}) ->
     Bucket =  proplists:get_value(bucket, Opts),
-    case Bucket of
-        undefined ->
-            Buckets = list_buckets(Partition, Port),
-            %% Fold over all keys in all buckets
-            fold_all_keys(Buckets, Acc, FoldKeysFun, Partition, Port);
-        _ ->
-            FoldFun = fold_keys_fun(FoldKeysFun, Bucket),
-            KeyStore = keystore(Bucket, Partition, Port),
-            innostore:fold_keys(FoldFun, Acc, KeyStore)
+    case lists:member(async_fold, Opts) of
+        true ->
+            KeyFolder = async_key_folder(Bucket, FoldKeysFun, Acc, Partition),
+            {async, KeyFolder};
+        false ->
+            FoldResults = sync_key_fold(Bucket, FoldKeysFun, Acc, Partition, Port),
+            {ok, FoldResults}
     end.
 
 %% @doc Fold over all the objects for one or all buckets.
@@ -172,16 +202,43 @@ fold_keys(FoldKeysFun, Acc, Opts, #state{partition_str=Partition,
 fold_objects(FoldObjectsFun, Acc, Opts, #state{partition_str=Partition,
                                                port=Port}) ->
     Bucket =  proplists:get_value(bucket, Opts),
-    case Bucket of
-        undefined ->
-            Buckets = list_buckets(Partition, Port),
-            %% Fold over all objects in all buckets
-            fold_all_objects(Buckets, Acc, FoldObjectsFun, Partition, Port);
-        _ ->
-            FoldFun = fold_objects_fun(FoldObjectsFun, Bucket),
-            KeyStore = keystore(Bucket, Partition, Port),
-            innostore:fold(FoldFun, Acc, KeyStore)
+    case lists:member(async_fold, Opts) of
+        true ->
+            KeyFolder = async_object_folder(Bucket, FoldObjectsFun, Acc, Partition),
+            {async, KeyFolder};
+        false ->
+            FoldResults = sync_object_fold(Bucket, FoldObjectsFun, Acc, Partition, Port),
+            {ok, FoldResults}
     end.
+
+    %% Bucket =  proplists:get_value(bucket, Opts),
+    %% case Bucket of
+    %%     undefined ->
+    %%         Buckets = list_buckets(Partition, Port),
+    %%         %% Fold over all objects in all buckets
+    %%         ObjectFolder =
+    %%             fun() ->
+    %%                     fold_all_objects(Buckets,
+    %%                                      Acc,
+    %%                                      FoldObjectsFun,
+    %%                                      Partition,
+    %%                                      Port)
+    %%             end;
+    %%     _ ->
+    %%         FoldFun = fold_objects_fun(FoldObjectsFun, Bucket),
+    %%         KeyStore = keystore(Bucket, Partition, Port),
+    %%         ObjectFolder =
+    %%             fun() ->
+    %%                     innostore:fold(FoldFun, Acc, KeyStore)
+    %%             end
+    %% end,
+    %% case lists:member(async_fold, Opts) of
+    %%     true ->
+    %%         {async, ObjectFolder};
+    %%     false ->
+
+    %%         {ok, ObjectFolder()}
+    %% end.
 
 %% @doc Delete all objects from this innostore backend
 -spec drop(state()) -> {ok, state()} | {error, term(), state()}.
@@ -234,10 +291,97 @@ fold_buckets_fun(FoldBucketsFun) ->
     end.
 
 %% @private
-%% Return a function to fold over keys on this backend
+%% Return a function to synchronously fold over keys on this backend
+async_key_folder(undefined, FoldFun, Acc, Partition) ->
+    fun() ->
+            case innostore:connect() of
+                {ok, Port} ->
+                    Buckets = list_buckets(Partition, Port),
+                    %% Fold over all keys in all buckets
+                    fold_all_keys(Buckets,
+                                  Acc,
+                                  FoldFun,
+                                  Partition,
+                                  Port);
+                {error, Reason} ->
+                    {error, Reason}
+            end
+    end;
+async_key_folder(Bucket, FoldFun, Acc, Partition) ->
+    FoldKeysFun = fold_keys_fun(FoldFun, Bucket),
+    fun() ->
+            case innostore:connect() of
+                {ok, Port} ->
+                    KeyStore = keystore(Bucket, Partition, Port),
+                    innostore:fold_keys(FoldKeysFun, Acc, KeyStore);
+                {error, Reason} ->
+                    {error, Reason}
+            end
+    end.
+
+%% @private
+%% Return a function to synchronously fold over keys on this backend
+sync_key_fold(undefined, FoldFun, Acc, Partition, Port) ->
+    Buckets = list_buckets(Partition, Port),
+    %% Fold over all keys in all buckets
+    fold_all_keys(Buckets,
+                  Acc,
+                  FoldFun,
+                  Partition,
+                  Port);
+sync_key_fold(Bucket, FoldFun, Acc, Partition, Port) ->
+    FoldKeysFun = fold_keys_fun(FoldFun, Bucket),
+    KeyStore = keystore(Bucket, Partition, Port),
+    innostore:fold_keys(FoldKeysFun, Acc, KeyStore).
+
+%% @private
 fold_keys_fun(FoldKeysFun, Bucket) ->
     fun(Key, Acc) ->
             FoldKeysFun(Bucket, Key, Acc)
+    end.
+
+%% @private
+%% Return a function to synchronously fold over objects on this backend
+sync_object_fold(undefined, FoldFun, Acc, Partition, Port) ->
+    Buckets = list_buckets(Partition, Port),
+    %% Fold over all keys in all buckets
+    fold_all_objects(Buckets,
+                     Acc,
+                     FoldFun,
+                     Partition,
+                     Port);
+sync_object_fold(Bucket, FoldFun, Acc, Partition, Port) ->
+    FoldObjectsFun = fold_objects_fun(FoldFun, Bucket),
+    KeyStore = keystore(Bucket, Partition, Port),
+    innostore:fold_keys(FoldObjectsFun, Acc, KeyStore).
+
+%% @private
+%% Return a function to synchronously fold over objects on this backend
+async_object_folder(undefined, FoldFun, Acc, Partition) ->
+    fun() ->
+            case innostore:connect() of
+                {ok, Port} ->
+                    Buckets = list_buckets(Partition, Port),
+                    %% Fold over all objects in all buckets
+                    fold_all_objects(Buckets,
+                                     Acc,
+                                     FoldFun,
+                                     Partition,
+                                     Port);
+                {error, Reason} ->
+                    {error, Reason}
+            end
+    end;
+async_object_folder(Bucket, FoldFun, Acc, Partition) ->
+    FoldObjectsFun = fold_objects_fun(FoldFun, Bucket),
+    fun() ->
+            case innostore:connect() of
+                {ok, Port} ->
+                    KeyStore = keystore(Bucket, Partition, Port),
+                    innostore:fold(FoldObjectsFun, Acc, KeyStore);
+                {error, Reason} ->
+                    {error, Reason}
+            end
     end.
 
 %% @private
