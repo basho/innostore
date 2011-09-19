@@ -162,9 +162,12 @@ fold_buckets(FoldBucketsFun, Acc, Opts, #state{partition_str=Partition,
                 fun() ->
                         case innostore:connect() of
                             {ok, Port1} ->
-                                lists:foldl(FilterFun,
-                                            Acc,
-                                            innostore:list_keystores(Port1));
+                                Acc0 =
+                                    lists:foldl(FilterFun,
+                                                Acc,
+                                                innostore:list_keystores(Port1)),
+                                innostore:disconnect(Port1),
+                                Acc0;
                             {error, Reason} ->
                                 {error, Reason}
                         end
@@ -273,7 +276,8 @@ async_key_folder(undefined, FoldFun, Acc, Partition) ->
                                   Acc,
                                   FoldFun,
                                   Partition,
-                                  Port);
+                                  Port),
+                    innostore:disconnect(Port);
                 {error, Reason} ->
                     {error, Reason}
             end
@@ -284,7 +288,8 @@ async_key_folder(Bucket, FoldFun, Acc, Partition) ->
             case innostore:connect() of
                 {ok, Port} ->
                     KeyStore = keystore(Bucket, Partition, Port),
-                    innostore:fold_keys(FoldKeysFun, Acc, KeyStore);
+                    innostore:fold_keys(FoldKeysFun, Acc, KeyStore),
+                    innostore:disconnect(Port);
                 {error, Reason} ->
                     {error, Reason}
             end
@@ -338,7 +343,8 @@ async_object_folder(undefined, FoldFun, Acc, Partition) ->
                                      Acc,
                                      FoldFun,
                                      Partition,
-                                     Port);
+                                     Port),
+                    innostore:disconnect(Port);
                 {error, Reason} ->
                     {error, Reason}
             end
@@ -349,7 +355,8 @@ async_object_folder(Bucket, FoldFun, Acc, Partition) ->
             case innostore:connect() of
                 {ok, Port} ->
                     KeyStore = keystore(Bucket, Partition, Port),
-                    innostore:fold(FoldObjectsFun, Acc, KeyStore);
+                    innostore:fold(FoldObjectsFun, Acc, KeyStore),
+                    innostore:disconnect(Port);
                 {error, Reason} ->
                     {error, Reason}
             end
@@ -620,6 +627,7 @@ cleanup(S) ->
     ok = ?MODULE:stop(S),
     {ok, Port} = innostore:connect(),
     [ok = innostore:drop_keystore(T, Port) || T <- innostore:list_keystores(Port)],
+    innostore:disconnect(Port),
     ok.
 
 -endif.
