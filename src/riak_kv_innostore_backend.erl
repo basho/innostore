@@ -30,7 +30,7 @@
          stop/1,
          get/3,
          put/5,
-         delete/3,
+         delete/4,
          drop/1,
          fold_buckets/4,
          fold_keys/4,
@@ -44,7 +44,7 @@
 -endif.
 
 -define(API_VERSION, 1).
--define(CAPABILITIES, []).
+-define(CAPABILITIES, [async_fold]).
 
 -record(state, { partition_str,
                  port }).
@@ -121,11 +121,14 @@ put(Bucket, Key, _IndexSpecs, Value, #state{partition_str=Partition,
     end.
 
 %% @doc Delete an object from the innostore backend
--spec delete(bucket(), key(), state()) ->
+%% NOTE: The innostore backend does not currently support
+%% secondary indexing and the _IndexSpecs parameter
+%% is ignored.
+-spec delete(bucket(), key(), [index_spec()], state()) ->
                     {ok, state()} |
                     {error, term(), state()}.
-delete(Bucket, Key, #state{partition_str=Partition,
-                           port=Port}=State) ->
+delete(Bucket, Key, _IndexSpecs, #state{partition_str=Partition,
+                                        port=Port}=State) ->
     KeyStore = keystore(Bucket, Partition, Port),
     case innostore:delete(Key, KeyStore) of
         ok ->
@@ -138,12 +141,44 @@ delete(Bucket, Key, #state{partition_str=Partition,
 -spec fold_buckets(fold_buckets_fun(),
                    any(),
                    [],
-                   state()) -> {ok, any()} | {error, term()}.
-fold_buckets(FoldBucketsFun, Acc, _Opts, #state{partition_str=Partition,
-                                                port=Port}) ->
+                   state()) -> {ok, any()} | {async, fun()} | {error, term()}.
+fold_buckets(FoldBucketsFun, Acc, Opts, #state{partition_str=Partition,
+                                               port=Port}) ->
     FoldFun = fold_buckets_fun(FoldBucketsFun),
-    Buckets = list_buckets(Partition, Port),
-    lists:foldl(FoldFun, Acc, Buckets).
+    Suffix = binary_to_list(Partition),
+    FilterFun =
+        fun(KeyStore, Acc1) ->
+                case lists:suffix(Suffix, KeyStore) of
+                    true ->
+                        Bucket = bucket_from_tablename(KeyStore),
+                        FoldFun(Bucket, Acc1);
+                    false ->
+                        Acc1
+                end
+        end,
+    case lists:member(async_fold, Opts) of
+        true ->
+            BucketFolder =
+                fun() ->
+                        case innostore:connect() of
+                            {ok, Port1} ->
+                                FoldResults =
+                                    lists:foldl(FilterFun,
+                                                Acc,
+                                                innostore:list_keystores(Port1)),
+                                innostore:disconnect(Port1),
+                                FoldResults;
+                            {error, Reason} ->
+                                {error, Reason}
+                        end
+                end,
+            {async, BucketFolder};
+        false ->
+            FoldResults = lists:foldl(FilterFun,
+                                      Acc,
+                                      innostore:list_keystores(Port)),
+            {ok, FoldResults}
+    end.
 
 %% @doc Fold over all the keys for one or all buckets.
 -spec fold_keys(fold_keys_fun(),
@@ -153,15 +188,13 @@ fold_buckets(FoldBucketsFun, Acc, _Opts, #state{partition_str=Partition,
 fold_keys(FoldKeysFun, Acc, Opts, #state{partition_str=Partition,
                                          port=Port}) ->
     Bucket =  proplists:get_value(bucket, Opts),
-    case Bucket of
-        undefined ->
-            Buckets = list_buckets(Partition, Port),
-            %% Fold over all keys in all buckets
-            fold_all_keys(Buckets, Acc, FoldKeysFun, Partition, Port);
-        _ ->
-            FoldFun = fold_keys_fun(FoldKeysFun, Bucket),
-            KeyStore = keystore(Bucket, Partition, Port),
-            innostore:fold_keys(FoldFun, Acc, KeyStore)
+    case lists:member(async_fold, Opts) of
+        true ->
+            KeyFolder = async_key_folder(Bucket, FoldKeysFun, Acc, Partition),
+            {async, KeyFolder};
+        false ->
+            FoldResults = sync_key_fold(Bucket, FoldKeysFun, Acc, Partition, Port),
+            {ok, FoldResults}
     end.
 
 %% @doc Fold over all the objects for one or all buckets.
@@ -172,15 +205,13 @@ fold_keys(FoldKeysFun, Acc, Opts, #state{partition_str=Partition,
 fold_objects(FoldObjectsFun, Acc, Opts, #state{partition_str=Partition,
                                                port=Port}) ->
     Bucket =  proplists:get_value(bucket, Opts),
-    case Bucket of
-        undefined ->
-            Buckets = list_buckets(Partition, Port),
-            %% Fold over all objects in all buckets
-            fold_all_objects(Buckets, Acc, FoldObjectsFun, Partition, Port);
-        _ ->
-            FoldFun = fold_objects_fun(FoldObjectsFun, Bucket),
-            KeyStore = keystore(Bucket, Partition, Port),
-            innostore:fold(FoldFun, Acc, KeyStore)
+    case lists:member(async_fold, Opts) of
+        true ->
+            KeyFolder = async_object_folder(Bucket, FoldObjectsFun, Acc, Partition),
+            {async, KeyFolder};
+        false ->
+            FoldResults = sync_object_fold(Bucket, FoldObjectsFun, Acc, Partition, Port),
+            {ok, FoldResults}
     end.
 
 %% @doc Delete all objects from this innostore backend
@@ -234,10 +265,106 @@ fold_buckets_fun(FoldBucketsFun) ->
     end.
 
 %% @private
-%% Return a function to fold over keys on this backend
+%% Return a function to synchronously fold over keys on this backend
+async_key_folder(undefined, FoldFun, Acc, Partition) ->
+    fun() ->
+            case innostore:connect() of
+                {ok, Port} ->
+                    Buckets = list_buckets(Partition, Port),
+                    %% Fold over all keys in all buckets
+                    FoldResults = fold_all_keys(Buckets,
+                                                Acc,
+                                                FoldFun,
+                                                Partition,
+                                                Port),
+                    innostore:disconnect(Port),
+                    FoldResults;
+                {error, Reason} ->
+                    {error, Reason}
+            end
+    end;
+async_key_folder(Bucket, FoldFun, Acc, Partition) ->
+    FoldKeysFun = fold_keys_fun(FoldFun, Bucket),
+    fun() ->
+            case innostore:connect() of
+                {ok, Port} ->
+                    KeyStore = keystore(Bucket, Partition, Port),
+                    FoldResults =
+                        innostore:fold_keys(FoldKeysFun, Acc, KeyStore),
+                    innostore:disconnect(Port),
+                    FoldResults;
+                {error, Reason} ->
+                    {error, Reason}
+            end
+    end.
+
+%% @private
+%% Return a function to synchronously fold over keys on this backend
+sync_key_fold(undefined, FoldFun, Acc, Partition, Port) ->
+    Buckets = list_buckets(Partition, Port),
+    %% Fold over all keys in all buckets
+    fold_all_keys(Buckets,
+                  Acc,
+                  FoldFun,
+                  Partition,
+                  Port);
+sync_key_fold(Bucket, FoldFun, Acc, Partition, Port) ->
+    FoldKeysFun = fold_keys_fun(FoldFun, Bucket),
+    KeyStore = keystore(Bucket, Partition, Port),
+    innostore:fold_keys(FoldKeysFun, Acc, KeyStore).
+
+%% @private
 fold_keys_fun(FoldKeysFun, Bucket) ->
     fun(Key, Acc) ->
             FoldKeysFun(Bucket, Key, Acc)
+    end.
+
+%% @private
+%% Return a function to synchronously fold over objects on this backend
+sync_object_fold(undefined, FoldFun, Acc, Partition, Port) ->
+    Buckets = list_buckets(Partition, Port),
+    %% Fold over all keys in all buckets
+    fold_all_objects(Buckets,
+                     Acc,
+                     FoldFun,
+                     Partition,
+                     Port);
+sync_object_fold(Bucket, FoldFun, Acc, Partition, Port) ->
+    FoldObjectsFun = fold_objects_fun(FoldFun, Bucket),
+    KeyStore = keystore(Bucket, Partition, Port),
+    innostore:fold_keys(FoldObjectsFun, Acc, KeyStore).
+
+%% @private
+%% Return a function to synchronously fold over objects on this backend
+async_object_folder(undefined, FoldFun, Acc, Partition) ->
+    fun() ->
+            case innostore:connect() of
+                {ok, Port} ->
+                    Buckets = list_buckets(Partition, Port),
+                    %% Fold over all objects in all buckets
+                    FoldResults = fold_all_objects(Buckets,
+                                                   Acc,
+                                                   FoldFun,
+                                                   Partition,
+                                                   Port),
+                    innostore:disconnect(Port),
+                    FoldResults;
+                {error, Reason} ->
+                    {error, Reason}
+            end
+    end;
+async_object_folder(Bucket, FoldFun, Acc, Partition) ->
+    FoldObjectsFun = fold_objects_fun(FoldFun, Bucket),
+    fun() ->
+            case innostore:connect() of
+                {ok, Port} ->
+                    KeyStore = keystore(Bucket, Partition, Port),
+                    FoldResults = innostore:fold(FoldObjectsFun, Acc, KeyStore),
+                    innostore:disconnect(Port),
+                    FoldResults;
+                {error, Reason} ->
+                    {error, Reason}
+            end
     end.
 
 %% @private
@@ -301,132 +428,211 @@ format_status([{K,V}|T]) ->
 %% ===================================================================
 -ifdef(TEST).
 
--define(TEST_BUCKET, <<"test">>).
--define(OTHER_TEST_BUCKET, <<"othertest">>).
+standard_test_() ->
+    Config = [
+              {data_home_dir,            "./test/innodb-backend"},
+              {log_group_home_dir,       "./test/innodb-backend"},
+              {buffer_pool_size,         2147483648}
+             ],
+    {spawn,
+     [
+      {setup,
+       fun() -> setup(Config) end,
+       fun cleanup/1,
+       fun(X) ->
+               [basic_store_and_fetch(X),
+                fold_buckets(X),
+                fold_keys(X),
+                delete_object(X),
+                fold_objects(X),
+                empty_check(X)
+               ]
+       end
+      }]}.
 
-innostore_riak_test_() ->
-    {spawn, [{"fold_buckets_test",
-              ?_test(
-                 begin
-                     reset(),
-                     {ok, S1} = start(0, undefined),
-                     {ok, S2} = start(1, undefined),
+basic_store_and_fetch(State) ->
+    {"basic store and fetch test",
+     fun() ->
+             [
+              ?_assertMatch({ok, _},
+                            ?MODULE:put(<<"b1">>, <<"k1">>, [], <<"v1">>, State)),
+              ?_assertMatch({ok, _},
+                            ?MODULE:put(<<"b2">>, <<"k2">>, [], <<"v2">>, State)),
+              ?_assertMatch({ok,<<"v2">>, _},
+                            ?MODULE:get(<<"b2">>, <<"k2">>, State)),
+              ?_assertMatch({error, not_found, _},
+                            ?MODULE:get(<<"b1">>, <<"k3">>, State))
+             ]
+     end
+    }.
 
-                     {ok, S1} = ?MODULE:put(?TEST_BUCKET, <<"p0key1">>, [], <<"abcdef">>, S1),
-                     {ok, S1} = ?MODULE:put(?TEST_BUCKET, <<"p0key2">>, [], <<"abcdef">>, S1),
-                     {ok, S2} = ?MODULE:put(?TEST_BUCKET, <<"p1key2">>, [], <<"dasdf">>, S2),
-                     {ok, S1} = ?MODULE:put(?OTHER_TEST_BUCKET, <<"p0key3">>, [], <<"123456">>, S1),
+fold_buckets(State) ->
+    {"bucket folding test",
+     fun() ->
+             FoldBucketsFun =
+                 fun(Bucket, Acc) ->
+                         [Bucket | Acc]
+                 end,
 
-                     FoldBucketsFun =
-                         fun(Bucket, Acc) ->
-                                 [Bucket | Acc]
-                         end,
-                     FoldKeysFun =
-                         fun(_Bucket, Key, Acc) ->
+             ?_assertEqual([<<"b1">>, <<"b2">>],
+                           begin
+                               {ok, Buckets1} =
+                                   ?MODULE:fold_buckets(FoldBucketsFun,
+                                                        [],
+                                                        [],
+                                                        State),
+                               lists:sort(Buckets1)
+                           end)
+     end
+    }.
+
+fold_keys(State) ->
+    {"key folding test",
+     fun() ->
+             FoldKeysFun =
+                 fun(Bucket, Key, Acc) ->
+                         [{Bucket, Key} | Acc]
+                 end,
+             FoldKeysFun1 =
+                 fun(_Bucket, Key, Acc) ->
+                         [Key | Acc]
+                 end,
+             FoldKeysFun2 =
+                 fun(Bucket, Key, Acc) ->
+                         case Bucket =:= <<"b1">> of
+                             true ->
+                                 [Key | Acc];
+                             false ->
+                                 Acc
+                         end
+                 end,
+             FoldKeysFun3 =
+                 fun(Bucket, Key, Acc) ->
+                         case Bucket =:= <<"b1">> of
+                             true ->
+                                 Acc;
+                             false ->
                                  [Key | Acc]
-                         end,
+                         end
+                 end,
+             [
+              ?_assertEqual([{<<"b1">>, <<"k1">>}, {<<"b2">>, <<"k2">>}],
+                            begin
+                                {ok, Keys1} =
+                                    ?MODULE:fold_keys(FoldKeysFun,
+                                                      [],
+                                                      [],
+                                                      State),
+                                lists:sort(Keys1)
+                            end),
+              ?_assertEqual({ok, [<<"k1">>]},
+                            ?MODULE:fold_keys(FoldKeysFun1,
+                                              [],
+                                              [{bucket, <<"b1">>}],
+                                              State)),
+              ?_assertEqual([<<"k2">>],
+                            ?MODULE:fold_keys(FoldKeysFun1,
+                                              [],
+                                              [{bucket, <<"b2">>}],
+                                              State)),
+              ?_assertEqual({ok, [<<"k1">>]},
+                            ?MODULE:fold_keys(FoldKeysFun2, [], [], State)),
+              ?_assertEqual({ok, [<<"k1">>]},
+                            ?MODULE:fold_keys(FoldKeysFun2,
+                                              [],
+                                              [{bucket, <<"b1">>}],
+                                              State)),
+              ?_assertEqual({ok, [<<"k2">>]},
+                            ?MODULE:fold_keys(FoldKeysFun3, [], [], State)),
+              ?_assertEqual({ok, []},
+                            ?MODULE:fold_keys(FoldKeysFun3,
+                                              [],
+                                              [{bucket, <<"b1">>}],
+                                              State))
+             ]
+     end
+    }.
 
-                     ?assertEqual([?OTHER_TEST_BUCKET, ?TEST_BUCKET],
-                                  lists:sort(fold_buckets(FoldBucketsFun, [], [], S1))),
+delete_object(State) ->
+    {"object deletion test",
+     fun() ->
+             [
+              ?_assertMatch({ok, _}, ?MODULE:delete(<<"b2">>, <<"k2">>, State)),
+              ?_assertMatch({error, not_found, _},
+                            ?MODULE:get(<<"b2">>, <<"k2">>, State))
+             ]
+     end
+    }.
 
-                     ?assertEqual([<<"p0key1">>,<<"p0key2">>],
-                                  lists:sort(fold_keys(FoldKeysFun, [], [{bucket, ?TEST_BUCKET}], S1))),
+fold_objects(State) ->
+    {"object folding test",
+     fun() ->
+             FoldKeysFun =
+                 fun(Bucket, Key, Acc) ->
+                         [{Bucket, Key} | Acc]
+                 end,
+             FoldObjectsFun =
+                 fun(Bucket, Key, Value, Acc) ->
+                         [{{Bucket, Key}, Value} | Acc]
+                 end,
+             [
+              ?_assertEqual([{<<"b1">>, <<"k1">>}],
+                            begin
+                                {ok, Keys} =
+                                    ?MODULE:fold_keys(FoldKeysFun,
+                                                      [],
+                                                      [],
+                                                      State),
+                                lists:sort(Keys)
+                            end),
 
-                     ?assertEqual([<<"p1key2">>],
-                                  lists:sort(fold_keys(FoldKeysFun, [], [{bucket, ?TEST_BUCKET}], S2))),
+              ?_assertEqual([{{<<"b1">>,<<"k1">>}, <<"v1">>}],
+                            begin
+                                {ok, Objects1} =
+                                    ?MODULE:fold_objects(FoldObjectsFun,
+                                                         [],
+                                                         [],
+                                                         State),
+                                lists:sort(Objects1)
+                            end),
+              ?_assertMatch({ok, _},
+                            ?MODULE:put(<<"b3">>, <<"k3">>, [], <<"v3">>, State)),
+              ?_assertEqual([{{<<"b1">>,<<"k1">>},<<"v1">>},
+                             {{<<"b3">>,<<"k3">>},<<"v3">>}],
+                            begin
+                                {ok, Objects} =
+                                    ?MODULE:fold_objects(FoldObjectsFun,
+                                                         [],
+                                                         [],
+                                                         State),
+                                lists:sort(Objects)
+                            end)
+             ]
+     end
+    }.
 
-                     ?assertEqual([<<"p0key3">>],
-                                  lists:sort(fold_keys(FoldKeysFun, [], [{bucket, ?OTHER_TEST_BUCKET}], S1))),
+empty_check(State) ->
+    {"is_empty test",
+     fun() ->
+             [
+              ?_assertEqual(false, ?MODULE:is_empty(State)),
+              ?_assertMatch({ok, _}, ?MODULE:delete(<<"b1">>,<<"k1">>, State)),
+              ?_assertMatch({ok, _}, ?MODULE:delete(<<"b3">>,<<"k3">>, State)),
+              ?_assertEqual(true, ?MODULE:is_empty(State))
+             ]
+     end
+    }.
 
-                     FindKeyFun = fun(<<"p0key1">>) -> true; (_) -> false end,
-                     FoldKeysFun1 =
-                         fun(_Bucket, Key, Acc) ->
-                                 case FindKeyFun(Key) of
-                                     true ->
-                                         [Key | Acc];
-                                     false ->
-                                         Acc
-                                 end
-                         end,
+setup(Config) ->
+    %% Start the backend
+    {ok, S} = ?MODULE:start(42, Config),
+    S.
 
-                     ?assertEqual([<<"p0key1">>],
-                                  lists:sort(fold_keys(FoldKeysFun1, [], [{bucket, ?TEST_BUCKET}], S1))),
-
-                     NotKeyFun = fun(<<"p0key1">>) -> false; (_) -> true end,
-                     FoldKeysFun2 =
-                         fun(_Bucket, Key, Acc) ->
-                                 case NotKeyFun(Key) of
-                                     true ->
-                                         [Key | Acc];
-                                     false ->
-                                         Acc
-                                 end
-                         end,
-
-                     ?assertEqual([<<"p0key2">>],
-                                  lists:sort(fold_keys(FoldKeysFun2, [], [{bucket, ?TEST_BUCKET}], S1))),
-
-                     FoldKeysFun3 =
-                         fun(Bucket, Key, Acc) ->
-                                 [{Bucket, Key} | Acc]
-                         end,
-                     ?assertEqual([{?OTHER_TEST_BUCKET, <<"p0key3">>},
-                                   {?TEST_BUCKET, <<"p0key1">>},
-                                   {?TEST_BUCKET, <<"p0key2">>}],
-                                  lists:sort(fold_keys(FoldKeysFun3, [], [], S1))),
-                     ?assertEqual([{?TEST_BUCKET, <<"p1key2">>}],
-                                  lists:sort(fold_keys(FoldKeysFun3, [], [], S2)))
-                 end)},
-
-             {"fold_keys_test",
-              ?_test(
-                 begin
-                     reset(),
-                     {ok, S1} = start(5, undefined),
-                     {ok, S1} = ?MODULE:put(?TEST_BUCKET, <<"abc">>, [], <<"123">>, S1),
-                     {ok, S1} = ?MODULE:put(?TEST_BUCKET, <<"def">>, [], <<"456">>, S1),
-                     {ok, S1} = ?MODULE:put(?TEST_BUCKET, <<"ghi">>, [], <<"789">>, S1),
-                     FoldKeysFun =
-                         fun(Bucket, Key, Acc) ->
-                                 [{Bucket, Key} | Acc]
-                         end,
-                     [{?TEST_BUCKET, <<"ghi">>},
-                      {?TEST_BUCKET, <<"def">>},
-                      {?TEST_BUCKET, <<"abc">>}] =
-                         ?MODULE:fold_keys(FoldKeysFun, [], [{bucket, ?TEST_BUCKET}], S1)
-                 end)},
-
-             {"fold_objects_test",
-              ?_test(
-                 begin
-                     reset(),
-                     {ok, S} = start(2, undefined),
-                     {ok, S} = ?MODULE:put(?TEST_BUCKET, <<"1">>, [], <<"abcdef">>, S),
-                     {ok, S} = ?MODULE:put(?TEST_BUCKET, <<"2">>, [], <<"foo">>, S),
-                     {ok, S} = ?MODULE:put(?TEST_BUCKET, <<"3">>, [], <<"bar">>, S),
-                     {ok, S} = ?MODULE:put(?TEST_BUCKET, <<"4">>, [], <<"baz">>, S),
-                     FoldObjectsFun =
-                         fun(Bucket, Key, Value, Acc) ->
-                                 [{{Bucket, Key}, Value} | Acc]
-                         end,
-                     [{{?TEST_BUCKET, <<"4">>}, <<"baz">>},
-                      {{?TEST_BUCKET, <<"3">>}, <<"bar">>},
-                      {{?TEST_BUCKET, <<"2">>}, <<"foo">>},
-                      {{?TEST_BUCKET, <<"1">>}, <<"abcdef">>}]
-                         = ?MODULE:fold_objects(FoldObjectsFun, [], [{bucket, ?TEST_BUCKET}], S)
-                 end)},
-             {"status test",
-              ?_test(
-                 begin
-                     reset(),
-                     {ok, S} = start(2, undefined),
-                     ?assertEqual(ok, status(S))
-                 end)}
-            ]}.
-
-reset() ->
+cleanup(S) ->
+    ok = ?MODULE:stop(S),
     {ok, Port} = innostore:connect(),
     [ok = innostore:drop_keystore(T, Port) || T <- innostore:list_keystores(Port)],
+    innostore:disconnect(Port),
     ok.
 
 -endif.
