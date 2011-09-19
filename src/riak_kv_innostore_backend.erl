@@ -153,21 +153,21 @@ fold_buckets(FoldBucketsFun, Acc, Opts, #state{partition_str=Partition,
                         Bucket = bucket_from_tablename(KeyStore),
                         FoldFun(Bucket, Acc1);
                     false ->
-                        Acc
+                        Acc1
                 end
         end,
     case lists:member(async_fold, Opts) of
         true ->
-    BucketFolder =
+            BucketFolder =
                 fun() ->
                         case innostore:connect() of
                             {ok, Port1} ->
-                                Acc0 =
+                                FoldResults =
                                     lists:foldl(FilterFun,
                                                 Acc,
                                                 innostore:list_keystores(Port1)),
                                 innostore:disconnect(Port1),
-                                Acc0;
+                                FoldResults;
                             {error, Reason} ->
                                 {error, Reason}
                         end
