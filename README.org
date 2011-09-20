@@ -18,14 +18,18 @@ innostore for storage.
 2. In the =innostore= directory, build it:
 :  $ make
 
-3. Install innostore ...
+3. Install innostore (may need root privs)...
    1. Option 1: ... into your Erlang distribution:
    :  $ make install
+      
+      This will install innostore to $OTPROOT/lib, so be sure you have
+      it set in your environment.
 
    2. Option 2: ... into an existing Riak build:
+   :  $ RIAK=/usr/lib/riak make install
 
-   : ** Use rebar to install into your Riak lib directory 
-   : $ ./rebar install target=$RIAK/lib
+      This will allow you to custom install innostore into the lib
+      folder that Riak is using. 
 
 4. Finally, configure riak to use innostore in =app.config= by setting
    the =storage_backend=. Change =riak/etc/app.config=:

@@ -1,0 +1,6 @@
+.eunit/
+ebin/
+embedded_innodb-*/
+c_src/innodb/lib/
+c_src/innostore_drv.o
+priv/innostore_drv.so
