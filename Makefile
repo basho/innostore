@@ -10,7 +10,7 @@ INSTALL_ERR      = "$(RIAK) doesn't exist or isn't writable."
 TARGET_ERR       = "Error: no target location defined - set RIAK or OTPROOT"
 INSTALL_MSG      = "Installing to $(RIAK)/lib..."
 
-.PHONY: package pkgclean
+.PHONY: package pkgclean distclean
 
 all: compile
 
@@ -48,9 +48,11 @@ buildtar = mkdir distdir && \
 distdir:
 	$(if $(INNOSTORE_TAG), $(call buildtar), $(error "You can't generate a release tarball from a non-tagged revision. Run 'git checkout <tag>', then 'make dist'"))
 
-dist $(REPO)-$(INNOSTORE_TAG).tar.gz: distdir
+dist $(RELEASE_NAME).tar.gz: distdir
 	cd distdir; \
 	tar czf ../$(RELEASE_NAME).tar.gz $(RELEASE_NAME)
+
+distclean: ballclean
 
 ballclean:
 	rm -rf $(RELEASE_NAME).tar.gz distdir
