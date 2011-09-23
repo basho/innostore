@@ -16,6 +16,8 @@ case "$1" in
         ;;
 
     *)
+        test -f innodb/lib/libinnodb.a && exit 0
+
         tar -xzf embedded_innodb-$INNO_VSN.tar.gz
         for x in patches/*; do
             echo $x
