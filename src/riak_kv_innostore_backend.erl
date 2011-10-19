@@ -160,13 +160,12 @@ fold_buckets(FoldBucketsFun, Acc, Opts, #state{partition_str=Partition,
         true ->
             BucketFolder =
                 fun() ->
-                        case innostore:connect() of
+                        case get_port() of
                             {ok, Port1} ->
                                 FoldResults =
                                     lists:foldl(FilterFun,
                                                 Acc,
                                                 innostore:list_keystores(Port1)),
-                                innostore:disconnect(Port1),
                                 FoldResults;
                             {error, Reason} ->
                                 {error, Reason}
@@ -246,6 +245,21 @@ callback(_Ref, _Msg, State) ->
 %% ===================================================================
 
 %% @private
+get_port() ->
+    case erlang:get(inno_port) of
+        undefined ->
+            case innostore:connect() of
+                {ok, Port} ->
+                    erlang:put(inno_port, Port),
+                    {ok, Port};
+                Error ->
+                    Error
+            end;
+        Port ->
+            {ok, Port}
+    end.
+
+%% @private
 keystore(Bucket, Partition, Port) ->
     KeyStoreId = <<Bucket/binary, Partition/binary>>,
     case erlang:get({innostore, KeyStoreId}) of
@@ -268,7 +282,7 @@ fold_buckets_fun(FoldBucketsFun) ->
 %% Return a function to synchronously fold over keys on this backend
 async_key_folder(undefined, FoldFun, Acc, Partition) ->
     fun() ->
-            case innostore:connect() of
+            case get_port() of
                 {ok, Port} ->
                     Buckets = list_buckets(Partition, Port),
                     %% Fold over all keys in all buckets
@@ -277,7 +291,6 @@ async_key_folder(undefined, FoldFun, Acc, Partition) ->
                                                 FoldFun,
                                                 Partition,
                                                 Port),
-                    innostore:disconnect(Port),
                     FoldResults;
                 {error, Reason} ->
                     {error, Reason}
@@ -286,12 +299,11 @@ async_key_folder(undefined, FoldFun, Acc, Partition) ->
 async_key_folder(Bucket, FoldFun, Acc, Partition) ->
     FoldKeysFun = fold_keys_fun(FoldFun, Bucket),
     fun() ->
-            case innostore:connect() of
+            case get_port() of
                 {ok, Port} ->
                     KeyStore = keystore(Bucket, Partition, Port),
                     FoldResults =
                         innostore:fold_keys(FoldKeysFun, Acc, KeyStore),
-                    innostore:disconnect(Port),
                     FoldResults;
                 {error, Reason} ->
                     {error, Reason}
@@ -338,7 +350,7 @@ sync_object_fold(Bucket, FoldFun, Acc, Partition, Port) ->
 %% Return a function to synchronously fold over objects on this backend
 async_object_folder(undefined, FoldFun, Acc, Partition) ->
     fun() ->
-            case innostore:connect() of
+            case get_port() of
                 {ok, Port} ->
                     Buckets = list_buckets(Partition, Port),
                     %% Fold over all objects in all buckets
@@ -347,7 +359,6 @@ async_object_folder(undefined, FoldFun, Acc, Partition) ->
                                                    FoldFun,
                                                    Partition,
                                                    Port),
-                    innostore:disconnect(Port),
                     FoldResults;
                 {error, Reason} ->
                     {error, Reason}
@@ -356,11 +367,10 @@ async_object_folder(undefined, FoldFun, Acc, Partition) ->
 async_object_folder(Bucket, FoldFun, Acc, Partition) ->
     FoldObjectsFun = fold_objects_fun(FoldFun, Bucket),
     fun() ->
-            case innostore:connect() of
+            case get_port() of
                 {ok, Port} ->
                     KeyStore = keystore(Bucket, Partition, Port),
                     FoldResults = innostore:fold(FoldObjectsFun, Acc, KeyStore),
-                    innostore:disconnect(Port),
                     FoldResults;
                 {error, Reason} ->
                     {error, Reason}
