@@ -251,7 +251,7 @@ keystore(Bucket, Partition, Port) ->
     case erlang:get({innostore, KeyStoreId}) of
         undefined ->
             {ok, KeyStore} = innostore:open_keystore(KeyStoreId, Port),
-            erlang:put({innostore, KeyStore}, KeyStore),
+            erlang:put({innostore, KeyStoreId}, KeyStore),
             KeyStore;
         KeyStore ->
             KeyStore
