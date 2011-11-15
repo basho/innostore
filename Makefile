@@ -40,10 +40,7 @@ buildtar = mkdir distdir && \
 		 git clone . distdir/$(REPO)-clone && \
 		 cd distdir/$(REPO)-clone && \
 		 git checkout $(INNOSTORE_TAG) && \
-		 $(call archive,$(RELEASE_NAME),..) && \
-		 mkdir ../$(RELEASE_NAME)/deps && \
-		 make deps; \
-		 for dep in deps/*; do cd $${dep} && $(call archive,$${dep},../../../$(RELEASE_NAME)); cd ../..; done
+		 $(call archive,$(RELEASE_NAME),..) && cd ..
 
 distdir:
 	$(if $(INNOSTORE_TAG), $(call buildtar), $(error "You can't generate a release tarball from a non-tagged revision. Run 'git checkout <tag>', then 'make dist'"))
