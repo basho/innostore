@@ -9,7 +9,9 @@ ifeq ($(PKGER),)
 PKGNAME         = $(RELEASE_NAME)-$(RELEASE)-deb-$(PLATFORM).tar.gz
 else
 # Redhat
-PKGNAME         = $(RELEASE_NAME)-$(RELEASE)-rh-$(PLATFORM).tar.gz
+DISTRO          = $(shell head -1 /etc/redhat-release| awk \
+                      '{if ($$0 ~ /CentOS release 5/) { print "el5"} else { print "el6" }} ')
+PKGNAME         = $(RELEASE_NAME)-$(RELEASE)-rh$(DISTRO)-$(PLATFORM).tar.gz
 endif
 endif
 ifeq ($(OS),SunOS)
